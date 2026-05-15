@@ -12993,11 +12993,16 @@ class HermesCLI:
         
         # Style for the application
         self._tui_style_base = {
-            'input-area': '#FFF8DC',
-            'placeholder': '#555555 italic',
-            'prompt': '#FFF8DC',
+            # Input area / prompt: empty style strings inherit the
+            # terminal's default foreground/background, so the typed
+            # text is readable in both light and dark Terminal.app
+            # color schemes.  (Hardcoding a near-white #FFF8DC made
+            # input invisible on light backgrounds.)
+            'input-area': '',
+            'placeholder': '#888888 italic',
+            'prompt': '',
             'prompt-working': '#888888 italic',
-            'hint': '#555555 italic',
+            'hint': '#888888 italic',
             'status-bar': 'bg:#1a1a2e #C0C0C0',
             'status-bar-strong': 'bg:#1a1a2e #FFD700 bold',
             'status-bar-dim': 'bg:#1a1a2e #8B8682',
