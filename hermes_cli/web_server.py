@@ -33,6 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from hermes_cli import __version__, __release_date__
+import hermes_events  # type: ignore[import-not-found]
 from hermes_cli.config import (
     cfg_get,
     DEFAULT_CONFIG,
@@ -3755,9 +3756,77 @@ async def pub_ws(ws: WebSocket) -> None:
 
     try:
         while True:
-            await _broadcast_event(channel, await ws.receive_text())
+            frame = await ws.receive_text()
+            # Legacy behavior: fan the frame out to every /api/events
+            # subscriber on this channel id. Drives the React sidebar's
+            # live tool-call feed and keeps the existing per-session pubsub
+            # working exactly as before.
+            await _broadcast_event(channel, frame)
+            # Phase 4 addition: also re-publish onto the local hermes_events
+            # bus so plugin_api.py modules (orb today, others later) can
+            # subscribe to TUI/gateway events without needing to know about
+            # WebSocket plumbing. Frame parsing is best-effort and never
+            # blocks the legacy fanout above — a malformed frame is logged
+            # at debug and discarded for bus purposes only.
+            try:
+                _republish_pub_frame_to_bus(frame)
+            except Exception:
+                _log.debug("pub_ws: bus republish failed for one frame", exc_info=True)
     except WebSocketDisconnect:
         pass
+
+
+def _republish_pub_frame_to_bus(frame: str) -> None:
+    """Best-effort: parse a frame received on ``/api/pub`` and re-publish it
+    onto the local ``hermes_events`` bus.
+
+    Two frame shapes are recognised:
+
+    1. **TUI sidecar JSON-RPC** ``{"jsonrpc": "2.0", "method": "event",
+       "params": {"type": <evt>, "session_id": <sid>, "payload": {...}}}``
+       — published as topic ``tui.<evt>`` with ``session_id`` + flattened
+       ``payload`` keys. The bus auto-stamps ``ts`` and ``src``.
+
+    2. **Bus relay** ``{"_bus_relay": true, "topic": <topic>,
+       "envelope": {<full envelope incl. type/ts/src/...>}}`` — published
+       verbatim onto the bus under ``topic``. The envelope's ``ts`` and
+       ``src`` are preserved (the bus only stamps missing keys), which is
+       critical for cross-process events where we want the original
+       timestamp from the gateway process.
+
+    Anything else is ignored silently.
+    """
+    try:
+        obj = json.loads(frame)
+    except (json.JSONDecodeError, ValueError):
+        return
+    if not isinstance(obj, dict):
+        return
+
+    # Shape 2: bus relay (gateway → dashboard, or future relays)
+    if obj.get("_bus_relay") is True:
+        topic = obj.get("topic")
+        envelope = obj.get("envelope")
+        if isinstance(topic, str) and isinstance(envelope, dict):
+            hermes_events.publish(topic, envelope)
+        return
+
+    # Shape 1: legacy TUI JSON-RPC event frame
+    if obj.get("method") == "event":
+        params = obj.get("params")
+        if not isinstance(params, dict):
+            return
+        evt = params.get("type")
+        if not isinstance(evt, str) or not evt:
+            return
+        bus_payload: dict = {}
+        sid = params.get("session_id")
+        if sid is not None:
+            bus_payload["session_id"] = sid
+        payload = params.get("payload")
+        if isinstance(payload, dict):
+            bus_payload.update(payload)
+        hermes_events.publish(f"tui.{evt}", bus_payload)
 
 
 @app.websocket("/api/events")

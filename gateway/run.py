@@ -4081,6 +4081,19 @@ class GatewayRunner:
         # Discover and load event hooks
         self.hooks.discover_and_load()
 
+        # Optionally bridge local hermes_events bus → dashboard so plugins
+        # in the dashboard process (orb, etc.) see gateway lifecycle events.
+        # No-op when HERMES_DASHBOARD_EVENT_URL/TOKEN env vars are unset
+        # (the common standalone-gateway case). See gateway/event_bridge.py.
+        try:
+            from gateway import event_bridge
+            event_bridge.start_if_configured()
+        except Exception:
+            logger.debug(
+                "gateway/event_bridge.start_if_configured failed; "
+                "continuing without dashboard event relay",
+                exc_info=True,
+            )
         
         # Recover background processes from checkpoint (crash recovery)
         try:
