@@ -235,14 +235,18 @@ onboards Telegram/Discord/etc. users to a paired gateway. Full parity with
 A consolidated administration panel for installation-wide operations:
 
 - **Host** — live system stats: OS / kernel, architecture, hostname, Python and Hermes versions, CPU core count + utilization, memory, disk usage of the Hermes home, uptime, and load average. (CPU/memory/disk come from `psutil` when installed; identity fields are always shown.)
+- **Nous Portal** — login status, the active inference provider, and the Tool Gateway routing table (which tools run via the Portal vs. locally), with a link to manage your subscription. Read-only mirror of `hermes portal`.
+- **Skill curator** — the background skill-maintenance status (active / paused, interval, last run) with pause/resume and a run-now button. Mirrors `hermes curator`.
 - **Gateway** — start, stop, and restart the messaging gateway, with live status (running/stopped, PID, state)
 - **Memory** — pick the external memory provider (or built-in only), and reset the built-in `MEMORY.md` / `USER.md` stores
 - **Credential pool** — add and remove the rotating API keys the agent round-robins through (per provider). Keys are redacted in the list; the raw value only ever reaches the agent.
-- **Operations** — run `doctor`, a security audit, create a backup, restore from a backup archive, or update skills. Each spawns a background action whose live log streams into the page.
+- **Operations** — run `doctor`, a security audit, create a backup, restore from a backup archive, update skills, show the system-prompt size breakdown, generate a support dump, or migrate config for retired settings. Each spawns a background action whose live log streams into the page.
 - **Checkpoints** — see the `/rollback` shadow store size and prune it
 - **Shell hooks** — list configured hooks with their consent + executable status, **create** a hook (event, command, matcher, timeout, with an opt-in consent grant), and remove one. Hooks run arbitrary commands, so the create form carries a security warning and the hook only fires after consent is granted.
 
-![System admin page — host stats and gateway lifecycle](/img/dashboard/admin-system-top.png)
+![System admin page — host stats and Nous Portal status](/img/dashboard/admin-system-top.png)
+
+![System admin page — skill curator, gateway, memory, and credential pool](/img/dashboard/admin-system-curator.png)
 
 ![System admin page — operations, checkpoints, and shell hooks](/img/dashboard/admin-system-ops.png)
 
@@ -398,6 +402,9 @@ same auth gate as the rest of `/api/`.
 | `GET /api/ops/checkpoints` · `POST .../prune` | Inspect / prune the `/rollback` store |
 | `POST /api/ops/hooks` · `DELETE /api/ops/hooks` | Create / remove a shell hook (consent-gated) |
 | `GET /api/system/stats` | Host stats — OS, CPU, memory, disk, uptime |
+| `GET /api/curator` · `PUT .../paused` · `POST .../run` | Skill-curator status + pause/resume + run |
+| `GET /api/portal` | Nous Portal auth + Tool Gateway routing (read-only) |
+| `POST /api/ops/prompt-size` · `/dump` · `/config-migrate` | Diagnostics (backgrounded) |
 | `PUT /api/webhooks/{name}/enabled` | Enable / disable a webhook route |
 | `POST /api/skills/hub/install` · `/uninstall` · `/update` | Skills hub actions (backgrounded) |
 
