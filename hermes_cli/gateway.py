@@ -14,6 +14,7 @@ import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
@@ -3789,7 +3790,7 @@ def _guard_official_docker_root_gateway() -> None:
     sys.exit(1)
 
 
-def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
+def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, http_port: Optional[int] = None, http_host: Optional[str] = None, http_token: Optional[str] = None, no_http: bool = False):
     """Run the gateway in foreground.
 
     Args:
@@ -3798,6 +3799,10 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
         replace: If True, kill any existing gateway instance before starting.
                  This prevents systemd restart loops when the old process
                  hasn't fully exited yet.
+        http_port: HTTP management API port (0 = auto-assign, default: from config)
+        http_host: HTTP management API bind host (default: from config)
+        http_token: HTTP management API token (auto-generated if not set)
+        no_http: If True, disable HTTP management API
     """
     _guard_official_docker_root_gateway()
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -3923,7 +3928,14 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
 
     success = False
     try:
-        success = asyncio.run(start_gateway(replace=replace, verbosity=verbosity))
+        success = asyncio.run(start_gateway(
+            replace=replace,
+            verbosity=verbosity,
+            http_port=http_port,
+            http_host=http_host,
+            http_token=http_token,
+            http_enabled=not no_http,
+        ))
         _exit_diag("asyncio.run.returned", success=success)
     except KeyboardInterrupt:
         # On Windows-detached runs this shouldn't fire (we absorb SIGINT above),

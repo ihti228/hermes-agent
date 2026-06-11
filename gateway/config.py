@@ -539,6 +539,12 @@ class GatewayConfig:
     # Streaming configuration
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
 
+    # HTTP Management API configuration
+    http_enabled: bool = True
+    http_host: str = "127.0.0.1"
+    http_port: int = 0  # 0 = auto-assign
+    http_token: Optional[str] = None  # None = auto-generate
+
     # Session store pruning: drop SessionEntry records older than this many
     # days from the in-memory dict and sessions.json.  Keeps the store from
     # growing unbounded in gateways serving many chats/threads/users over
@@ -641,6 +647,11 @@ class GatewayConfig:
             "unauthorized_dm_behavior": self.unauthorized_dm_behavior,
             "streaming": self.streaming.to_dict(),
             "session_store_max_age_days": self.session_store_max_age_days,
+            # HTTP Management API
+            "http_enabled": self.http_enabled,
+            "http_host": self.http_host,
+            "http_port": self.http_port,
+            "http_token": self.http_token,
         }
     
     @classmethod
@@ -724,6 +735,11 @@ class GatewayConfig:
             unauthorized_dm_behavior=unauthorized_dm_behavior,
             streaming=StreamingConfig.from_dict(data.get("streaming", {})),
             session_store_max_age_days=session_store_max_age_days,
+            # HTTP Management API
+            http_enabled=_coerce_bool(data.get("http_enabled"), True),
+            http_host=data.get("http_host", "127.0.0.1"),
+            http_port=_coerce_optional_positive_int(data.get("http_port"), "http_port") or 0,
+            http_token=data.get("http_token"),
         )
 
     def get_unauthorized_dm_behavior(self, platform: Optional[Platform] = None) -> str:
@@ -842,6 +858,23 @@ def load_gateway_config() -> GatewayConfig:
                     yaml_cfg.get("unauthorized_dm_behavior"),
                     "pair",
                 )
+
+            # HTTP Management API config
+            http_section = None
+            if "gateway" in yaml_cfg and isinstance(yaml_cfg["gateway"], dict):
+                http_section = yaml_cfg["gateway"].get("http")
+            elif "http" in yaml_cfg:
+                http_section = yaml_cfg.get("http")
+            
+            if isinstance(http_section, dict):
+                if "enabled" in http_section:
+                    gw_data["http_enabled"] = http_section["enabled"]
+                if "host" in http_section:
+                    gw_data["http_host"] = http_section["host"]
+                if "port" in http_section:
+                    gw_data["http_port"] = http_section["port"]
+                if "token" in http_section:
+                    gw_data["http_token"] = http_section["token"]
 
             # Merge platform config into gw_data so runtime-only settings under
             # ``gateway.platforms`` are loaded the same way as top-level
@@ -2078,3 +2111,23 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
 
     for platform_config in config.platforms.values():
         platform_config.extra.pop("_enabled_explicit", None)
+
+    # HTTP Management API
+    http_enabled = os.getenv("GATEWAY_HTTP_ENABLED")
+    if http_enabled is not None:
+        config.http_enabled = http_enabled.lower() in {"true", "1", "yes"}
+    
+    http_host = os.getenv("GATEWAY_HTTP_HOST")
+    if http_host:
+        config.http_host = http_host
+    
+    http_port = os.getenv("GATEWAY_HTTP_PORT")
+    if http_port:
+        try:
+            config.http_port = int(http_port)
+        except ValueError:
+            pass
+    
+    http_token = os.getenv("GATEWAY_HTTP_TOKEN")
+    if http_token:
+        config.http_token = http_token

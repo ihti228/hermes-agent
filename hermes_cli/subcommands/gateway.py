@@ -58,6 +58,28 @@ def build_gateway_parser(subparsers, *, cmd_gateway: Callable, cmd_proxy: Callab
             "gateway's exit code. No effect outside an s6 container."
         ),
     )
+    # HTTP Management API
+    gateway_run.add_argument(
+        "--http-port",
+        type=int,
+        default=None,
+        help="HTTP management API port (0 = auto-assign, default: 0)",
+    )
+    gateway_run.add_argument(
+        "--http-host",
+        default=None,
+        help="HTTP management API bind host (default: 127.0.0.1)",
+    )
+    gateway_run.add_argument(
+        "--http-token",
+        default=None,
+        help="HTTP management API token (auto-generated if not set)",
+    )
+    gateway_run.add_argument(
+        "--no-http",
+        action="store_true",
+        help="Disable HTTP management API",
+    )
     add_accept_hooks_flag(gateway_run)
     add_accept_hooks_flag(gateway_parser)
 

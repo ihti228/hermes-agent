@@ -15620,7 +15620,15 @@ def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, in
     logger.info("Cron ticker stopped")
 
 
-async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = False, verbosity: Optional[int] = 0) -> bool:
+async def start_gateway(
+    config: Optional[GatewayConfig] = None,
+    replace: bool = False,
+    verbosity: Optional[int] = 0,
+    http_port: Optional[int] = None,
+    http_host: Optional[str] = None,
+    http_token: Optional[str] = None,
+    http_enabled: Optional[bool] = None,
+) -> bool:
     """
     Start the gateway and run until interrupted.
     
@@ -15633,6 +15641,10 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         replace: If True, kill any existing gateway instance before starting.
                  Useful for systemd services to avoid restart-loop deadlocks
                  when the previous process hasn't fully exited yet.
+        http_port: HTTP management API port (0 = auto-assign, None = use config)
+        http_host: HTTP management API bind host (None = use config)
+        http_token: HTTP management API token (None = auto-generate)
+        http_enabled: If False, disable HTTP management API (None = use config)
     """
     # ── Duplicate-instance guard ──────────────────────────────────────
     # Prevent two gateways from running under the same HERMES_HOME.
@@ -15800,6 +15812,20 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         if _stderr_level < logging.getLogger().level:
             logging.getLogger().setLevel(_stderr_level)
 
+    # Ensure config exists and apply HTTP management API CLI overrides
+    if config is None:
+        config = load_gateway_config()
+    
+    # Apply HTTP management API CLI overrides
+    if http_enabled is not None:
+        config.http_enabled = http_enabled
+    if http_port is not None:
+        config.http_port = http_port
+    if http_host is not None:
+        config.http_host = http_host
+    if http_token is not None:
+        config.http_token = http_token
+    
     runner = GatewayRunner(config)
     
     # Track whether an unexpected signal initiated the shutdown. When an
@@ -16013,6 +16039,29 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
             logger.error("Gateway exiting cleanly: %s", runner.exit_reason)
         return True
     
+    # Start HTTP Management API server
+    http_server = None
+    http_task = None
+    if config.http_enabled:
+        try:
+            import secrets
+            from gateway.http_api import run_http_server as _run_http_server
+            
+            # Generate token if not provided
+            http_token = config.http_token or secrets.token_urlsafe(32)
+            config.http_token = http_token
+            
+            http_server, actual_port = await _run_http_server(
+                runner=runner,
+                host=config.http_host,
+                port=config.http_port,
+                token=http_token,
+            )
+            config.http_port = actual_port
+            logger.info("HTTP Management API started on %s:%d", config.http_host, actual_port)
+        except Exception as e:
+            logger.error("Failed to start HTTP Management API: %s", e)
+    
     # Start background cron ticker so scheduled jobs fire automatically.
     # Pass the event loop so cron delivery can use live adapters (E2EE support).
     cron_stop = threading.Event()
@@ -16036,7 +16085,15 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # Stop cron ticker cleanly
     cron_stop.set()
     cron_thread.join(timeout=5)
-
+    
+    # Stop HTTP Management API server
+    if http_server is not None:
+        try:
+            await http_server.shutdown()
+            logger.info("HTTP Management API stopped")
+        except Exception as e:
+            logger.debug("HTTP server shutdown error: %s", e)
+    
     # Stop the planned-stop watcher (daemon=True so this is belt-and-suspenders).
     _planned_stop_watcher_stop.set()
     _planned_stop_watcher_thread.join(timeout=2)
