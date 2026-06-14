@@ -82,6 +82,15 @@ export const acquireRenderer = Effect.fn('Renderer.acquire')(function* (options:
           // scrollbox clips growing output → no terminal-scrollback corruption (gotcha §8 #2).
           externalOutputMode: 'passthrough',
           targetFps: 60,
+          // Don't let core's uncaught-error handler call the ALLOCATING
+          // `console.show()` (0.4.1 public option; defaults true-in-dev). That
+          // call needs a native handle, so under handle-table exhaustion — the
+          // very condition being reported — it throws and exit-7-masks the
+          // original error (the bench mem3000 postmortem). Disabling it removes
+          // that failure mode at the source; `guardRendererErrorHandlers` below
+          // stays as belt-and-suspenders (honest logging if any core handler
+          // still throws), but is no longer load-bearing for the exit-7 mask.
+          openConsoleOnError: false,
           // prompts own Ctrl+C → deny/cancel (gotcha §8 #6); the global quit is gated on !blocked.
           exitOnCtrlC: false,
           // OpenTUI's default exitSignals include SIGPIPE + SIGBUS, and its handler
