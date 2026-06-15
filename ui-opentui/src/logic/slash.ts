@@ -252,6 +252,7 @@ const CLIENT_HELP_LINES = [
   '/model [name] — switch model (picker if bare)',
   '/copy [n] — copy the last (or n-th) response',
   '/skills — browse skills',
+  '/skin [name] — switch theme skin (live)',
   '/sessions [cron|gateways|all] — browse/resume sessions (tabbed picker)',
   '/resume [id|name] — resume directly, or open the picker',
   '/clear, /new — clear the transcript (confirm)',
@@ -626,6 +627,31 @@ const detailsCmd: ClientHandler = async (arg, ctx) => {
   ctx.pushSystem(`details: ${next}`)
 }
 
+/** `/skin [name]` — switch the active theme skin (Ink parity:
+ *  ui-tui/src/app/slash/commands/session.ts). Bare `/skin` reports the persisted
+ *  skin (`config.get skin`); `/skin <name>` persists via `config.set` which makes
+ *  the gateway emit `skin.changed` → the store re-themes the running UI LIVE (no
+ *  relaunch). Skin-name arg completion comes from the gateway's `complete.slash`
+ *  for free. Fire-and-forget with a guarded notice, matching compact/details. */
+const skinCmd: ClientHandler = async (arg, ctx) => {
+  const name = arg.trim()
+  if (!name) {
+    try {
+      const r = await ctx.request('config.get', { key: 'skin' })
+      ctx.pushSystem(`skin: ${readStr(r, 'value') || 'default'}`)
+    } catch {
+      ctx.pushSystem('skin: default')
+    }
+    return
+  }
+  try {
+    const r = await ctx.request('config.set', { key: 'skin', value: name })
+    ctx.pushSystem(`skin → ${readStr(r, 'value') || name}`)
+  } catch (error) {
+    ctx.pushSystem(`/skin: ${error instanceof Error ? error.message : 'config.set failed'}`)
+  }
+}
+
 /** Fetch + map the session's archived spawn trees (`spawn_tree.list`). */
 async function listSpawnTrees(ctx: SlashContext) {
   const r = await ctx.request('spawn_tree.list', { limit: 30, session_id: ctx.sessionId() ?? 'default' })
@@ -758,6 +784,7 @@ const CLIENT: Record<string, ClientHandler> = {
   session: sessionsCmd,
   sessions: sessionsCmd,
   skills: skillsCmd,
+  skin: skinCmd,
   switch: sessionsCmd,
   tasks: (_arg, ctx) => ctx.openDashboard(),
   tools: toolsCmd,

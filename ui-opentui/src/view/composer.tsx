@@ -150,6 +150,12 @@ export function Composer(props: {
    *  parent opens the session prompt-history viewer (or does nothing when the
    *  session has no prompts yet — never an empty modal). */
   onDoubleEsc?: (() => void) | undefined
+  /** The persisted draft to seed the buffer with on mount (survives the
+   *  composer unmounting when a blocking prompt replaces it). */
+  initialDraft?: (() => string) | undefined
+  /** Called with the live draft text on every edit (persist) and '' on submit
+   *  (clear) — lets the parent stash it so it outlives a composer unmount. */
+  onDraftChange?: ((text: string) => void) | undefined
 }) {
   const theme = useTheme()
   const dims = useDimensions()
@@ -232,6 +238,36 @@ export function Composer(props: {
       syntax = undefined
     }
   })
+  // Live re-theme: re-register the slash-token color when the skin changes so the
+  // composer's highlight repaints without waiting for a remount (skin.changed →
+  // theme() → here). registerStyle on the same name updates the style in place;
+  // the highlight createEffect below re-tracks `theme()` so ranges re-apply.
+  createEffect(() => {
+    const accent = theme().color.accent
+    if (!syntax) return
+    try {
+      tokenStyleId = syntax.registerStyle('slash-token', { bold: true, fg: accent })
+    } catch {
+      /* cosmetic — never crash on a native restyle */
+    }
+  })
+  // Live re-theme of the native <textarea>: the uncontrolled TextareaRenderable
+  // caches its color props, so a reactive skin change (skin.changed → theme())
+  // does NOT recolor the input or the text being typed until remount. Push the
+  // colors imperatively onto the ref each time the theme changes (the native
+  // setters call editBuffer.setDefaultFg + requestRender, so existing text
+  // recolors too). placeholderColor has no native setter, so it can only update
+  // on remount — accepted (the placeholder is only visible when empty/unfocused).
+  createEffect(() => {
+    const t = theme().color
+    if (!ta || ta.isDestroyed) return
+    try {
+      ta.textColor = t.text
+      ta.cursorColor = t.accent
+    } catch {
+      /* cosmetic — never crash on a native restyle */
+    }
+  })
   onCleanup(() => {
     try {
       if (ta && !ta.isDestroyed) ta.syntaxStyle = null
@@ -243,6 +279,7 @@ export function Composer(props: {
   })
   createEffect(() => {
     const a = analysis()
+    void theme().color.accent // re-track: re-apply highlights after a live re-theme
     if (!ta || !syntax || ta.isDestroyed) return
     try {
       const text = bufText()
@@ -311,6 +348,7 @@ export function Composer(props: {
     props.onSubmit(text)
     props.history?.push(text)
     ta.clear()
+    props.onDraftChange?.('') // submitted → drop the persisted draft (explicit; don't rely on clear()'s onContentChange)
     props.pasteStore?.clear()
     props.onDismiss?.()
     submitting = false
@@ -480,6 +518,13 @@ export function Composer(props: {
   })
 
   onMount(() => {
+    // Restore a persisted draft (e.g. typed before a clarify prompt replaced
+    // the composer in the <Switch>, which unmounts it + its native buffer).
+    const draft = props.initialDraft?.() ?? ''
+    if (draft) {
+      setBuffer(draft)
+      setBufText(draft)
+    }
     ta?.focus()
     props.registerFocus?.(() => ta?.focus())
   })
@@ -587,6 +632,7 @@ export function Composer(props: {
           onContentChange={() => {
             const text = ta?.plainText ?? ''
             setBufText(text) // drives the token analysis (highlight + suggestion)
+            props.onDraftChange?.(text) // persist so it survives a clarify-prompt unmount
             syncCursorLine()
             props.onType?.(text, ta?.cursorOffset ?? text.length)
           }}

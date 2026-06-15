@@ -24,7 +24,12 @@ export const GatewaySkinSchema = Schema.Struct({
   branding: opt(Schema.Record(Str, Str)),
   colors: opt(Schema.Record(Str, Str)),
   help_header: opt(Str),
-  tool_prefix: opt(Str)
+  tool_prefix: opt(Str),
+  // Spinner animation data (faces/verbs/wings) — mixed array/tuple shapes, kept
+  // loose at the boundary; the spinner component narrows what it reads. tool_emojis
+  // is a per-tool glyph override map. Both additive + optional (back-compat).
+  spinner: opt(Schema.Record(Str, Schema.Unknown)),
+  tool_emojis: opt(Schema.Record(Str, Str))
 })
 export type GatewaySkinDecoded = typeof GatewaySkinSchema.Type
 

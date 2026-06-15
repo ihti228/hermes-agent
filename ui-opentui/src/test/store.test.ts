@@ -28,6 +28,42 @@ describe('session store — theming / dedup / hydrate (Phase 1)', () => {
     expect(store.state.theme.brand.name).toBe('Aurora')
   })
 
+  test('skin survives /clear and resume (theme is NOT a session-scoped slice)', () => {
+    const store = createSessionStore()
+    store.apply({
+      type: 'skin.changed',
+      payload: { branding: { agent_name: 'Aurora' }, colors: { ui_primary: '#abcdef' } }
+    })
+    store.clearTranscript()
+    expect(store.state.theme.brand.name).toBe('Aurora')
+    expect(store.state.theme.color.primary).toBe('#abcdef')
+    // resume path (commitSnapshot) must also preserve the active skin
+    store.commitSnapshot([])
+    expect(store.state.theme.brand.name).toBe('Aurora')
+    expect(store.state.theme.color.primary).toBe('#abcdef')
+  })
+
+  test('skin spinner + tool_emojis flow onto the theme (B wire-up)', () => {
+    const store = createSessionStore()
+    store.apply({
+      type: 'skin.changed',
+      payload: {
+        spinner: { thinking_faces: ['(a)', '(b)'], wings: [['<', '>']], thinking_verbs: ['forging'] },
+        tool_emojis: { terminal: '⚔' }
+      }
+    })
+    expect(store.state.theme.spinner.thinkingFaces).toEqual(['(a)', '(b)'])
+    expect(store.state.theme.spinner.wings).toEqual([['<', '>']])
+    expect(store.state.theme.toolEmojis.terminal).toBe('⚔')
+  })
+
+  test('ui_bg sets theme.color.bg; default stays transparent (D root-canvas opt-in)', () => {
+    const store = createSessionStore()
+    expect(store.state.theme.color.bg).toBe('transparent')
+    store.apply({ type: 'skin.changed', payload: { colors: { ui_bg: '#0A0A0A' } } })
+    expect(store.state.theme.color.bg).toBe('#0A0A0A')
+  })
+
   test('LRU dedup: duplicate(id) returns false once, true after', () => {
     const store = createSessionStore()
     expect(store.duplicate('evt-1')).toBe(false)
@@ -650,5 +686,84 @@ describe('session store — rolling message cap (bounds the Yoga node high-water
     expect(store.state.dropped).toBe(3)
     store.clearTranscript()
     expect(store.state.dropped).toBe(0)
+  })
+})
+
+describe('session store — todo panel snapshot + draft + /new info reset', () => {
+  const todoComplete = (
+    todos: Array<{ id: string; content: string; status: string }>,
+    summary?: Record<string, number>
+  ) =>
+    ({
+      type: 'tool.complete',
+      payload: {
+        tool_id: 't1',
+        name: 'todo',
+        args: { todos },
+        result: { todos, ...(summary ? { summary } : {}) },
+        duration_s: 0
+      }
+    }) as never
+
+  test('captures latestTodos from a todo tool.complete (result.todos)', () => {
+    const store = createSessionStore()
+    store.apply(
+      todoComplete(
+        [
+          { id: '0', content: 'a', status: 'completed' },
+          { id: '1', content: 'b', status: 'in_progress' },
+          { id: '2', content: 'c', status: 'pending' }
+        ],
+        { completed: 1, in_progress: 1, pending: 1, cancelled: 0 }
+      )
+    )
+    const snap = store.state.latestTodos
+    expect(snap).toBeDefined()
+    expect(snap?.todos).toHaveLength(3)
+    // list order is preserved (priority) — never re-sorted
+    expect(snap?.todos.map(t => t.content)).toEqual(['a', 'b', 'c'])
+    expect(snap?.counts).toEqual({ total: 3, completed: 1, in_progress: 1, pending: 1, cancelled: 0 })
+  })
+
+  test('a malformed/empty todo call does not clobber a good prior snapshot', () => {
+    const store = createSessionStore()
+    store.apply(todoComplete([{ id: '0', content: 'keep', status: 'pending' }]))
+    expect(store.state.latestTodos?.todos).toHaveLength(1)
+    store.apply(todoComplete([]))
+    expect(store.state.latestTodos?.todos).toEqual([{ content: 'keep', status: 'pending' }])
+  })
+
+  test('latestTodos clears on clearTranscript (/new starts a fresh plan)', () => {
+    const store = createSessionStore()
+    store.apply(todoComplete([{ id: '0', content: 'x', status: 'pending' }]))
+    expect(store.state.latestTodos).toBeDefined()
+    store.clearTranscript()
+    expect(store.state.latestTodos).toBeUndefined()
+  })
+
+  test('composerDraft persists via setComposerDraft', () => {
+    const store = createSessionStore()
+    expect(store.state.composerDraft).toBe('')
+    store.setComposerDraft('half-typed message')
+    expect(store.state.composerDraft).toBe('half-typed message')
+    store.setComposerDraft('')
+    expect(store.state.composerDraft).toBe('')
+  })
+
+  test('clearTranscript zeroes the usage gauges but keeps session identity', () => {
+    const store = createSessionStore()
+    store.applyInfo({
+      model: 'm',
+      cwd: '/x',
+      usage: { context_used: 84000, context_percent: 42, cost_usd: 0.5, compressions: 2 }
+    } as never)
+    expect(store.state.info.contextUsed).toBe(84000)
+    store.clearTranscript()
+    expect(store.state.info.contextUsed).toBeUndefined()
+    expect(store.state.info.contextPercent).toBeUndefined()
+    expect(store.state.info.costUsd).toBeUndefined()
+    expect(store.state.info.compressions).toBeUndefined()
+    expect(store.state.info.model).toBe('m')
+    expect(store.state.info.cwd).toBe('/x')
   })
 })

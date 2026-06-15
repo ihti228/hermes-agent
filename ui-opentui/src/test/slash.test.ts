@@ -366,6 +366,23 @@ describe('dispatchSlash — client commands', () => {
     expect(p.system.at(-1)).toContain('usage: /sessions')
   })
 
+  test('/skin <name> persists via config.set (the gateway then emits skin.changed)', async () => {
+    const p = makeCtx(async method => (method === 'config.set' ? { key: 'skin', value: 'ares' } : {}))
+    await dispatchSlash('/skin ares', p.ctx)
+    const set = p.calls.find(c => c.method === 'config.set')
+    expect(set).toBeDefined()
+    expect(set?.params).toMatchObject({ key: 'skin', value: 'ares' })
+    expect(p.system.at(-1)).toContain('ares')
+  })
+
+  test('/skin bare reports the persisted skin via config.get', async () => {
+    const p = makeCtx(async method => (method === 'config.get' ? { value: 'poseidon' } : {}))
+    await dispatchSlash('/skin', p.ctx)
+    const get = p.calls.find(c => c.method === 'config.get')
+    expect(get?.params).toMatchObject({ key: 'skin' })
+    expect(p.system.at(-1)).toContain('poseidon')
+  })
+
   test('/resume <id|name> keeps the DIRECT path: resolves against session.list and resumes', async () => {
     const rows = {
       sessions: [

@@ -128,7 +128,13 @@ export function ToolPart(props: { part: ToolPartState }) {
   // `error` only lands on tool.complete, so running stays ⚡.
   const failed = () => !running() && Boolean(props.part.error)
   const headGlyph = () =>
-    failed() ? '✗' : running() ? '⚡' : collapsible() && expanded() ? '▼' : glyphFor(props.part.name)
+    failed()
+      ? '✗'
+      : running()
+        ? '⚡'
+        : collapsible() && expanded()
+          ? '▼'
+          : glyphFor(props.part.name, theme().toolEmojis)
   // Settled machinery is BLUE (`shellDollar` — "blue is the hum of machinery");
   // running is accent heat; failed is error. The NAME is muted-bright bold (see
   // toolNameStyle); subtitle/metadata stay muted grey — the machinery tier

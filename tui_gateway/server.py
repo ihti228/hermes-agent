@@ -1393,6 +1393,11 @@ def resolve_skin() -> dict:
             "banner_hero": skin.banner_hero,
             "tool_prefix": skin.tool_prefix,
             "help_header": (skin.branding or {}).get("help_header", ""),
+            # Native engines (Ink + OpenTUI) can now consume these too: spinner
+            # animation data (faces/verbs/wings) and per-tool emoji overrides.
+            # Additive + optional — old engines ignore unknown keys.
+            "spinner": skin.spinner or {},
+            "tool_emojis": skin.tool_emojis or {},
         }
     except Exception:
         return {}

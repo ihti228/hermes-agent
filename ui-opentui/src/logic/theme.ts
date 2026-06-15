@@ -87,6 +87,10 @@ export interface Theme {
   brand: ThemeBrand
   bannerLogo: string
   bannerHero: string
+  /** Spinner animation config from the skin (empty = engine defaults). */
+  spinner: SpinnerConfig
+  /** Per-tool glyph overrides from the skin (tool name → glyph); {} = registry defaults. */
+  toolEmojis: Record<string, string>
 }
 
 /** The skin payload as emitted by the gateway (mirror ui-tui/src/gatewayTypes.ts GatewaySkin). */
@@ -97,6 +101,44 @@ export interface GatewaySkin {
   colors?: Record<string, string>
   help_header?: string
   tool_prefix?: string
+  /** Spinner animation data (faces/verbs/wings) — loose; SpinnerConfig narrows it. */
+  spinner?: Record<string, unknown>
+  /** Per-tool glyph overrides (tool name → emoji/char). */
+  tool_emojis?: Record<string, string>
+}
+
+/** Normalized spinner animation config the busy indicator consumes. Empty arrays
+ *  mean "use the engine defaults" (a skin that ships no spinner block). */
+export interface SpinnerConfig {
+  waitingFaces: string[]
+  thinkingFaces: string[]
+  thinkingVerbs: string[]
+  /** [left, right] decoration pairs. */
+  wings: [string, string][]
+}
+
+const EMPTY_SPINNER: SpinnerConfig = { waitingFaces: [], thinkingFaces: [], thinkingVerbs: [], wings: [] }
+
+/** Parse the loose gateway `spinner` record into a typed SpinnerConfig (defensive:
+ *  any malformed field → empty, so a bad skin never crashes the spinner). */
+export function parseSpinner(raw: Record<string, unknown> | undefined): SpinnerConfig {
+  if (!raw || typeof raw !== 'object') return EMPTY_SPINNER
+  const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const wings: [string, string][] = []
+  const rawWings = (raw as { wings?: unknown }).wings
+  if (Array.isArray(rawWings)) {
+    for (const pair of rawWings) {
+      if (Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && typeof pair[1] === 'string') {
+        wings.push([pair[0], pair[1]])
+      }
+    }
+  }
+  return {
+    waitingFaces: strArr((raw as { waiting_faces?: unknown }).waiting_faces),
+    thinkingFaces: strArr((raw as { thinking_faces?: unknown }).thinking_faces),
+    thinkingVerbs: strArr((raw as { thinking_verbs?: unknown }).thinking_verbs),
+    wings
+  }
 }
 
 // ── Color math ───────────────────────────────────────────────────────
@@ -306,7 +348,9 @@ export const DARK_THEME: Theme = {
   },
   brand: BRAND,
   bannerLogo: '',
-  bannerHero: ''
+  bannerHero: '',
+  spinner: EMPTY_SPINNER,
+  toolEmojis: {}
 }
 
 export const LIGHT_THEME: Theme = {
@@ -351,7 +395,9 @@ export const LIGHT_THEME: Theme = {
   },
   brand: BRAND,
   bannerLogo: '',
-  bannerHero: ''
+  bannerHero: '',
+  spinner: EMPTY_SPINNER,
+  toolEmojis: {}
 }
 
 const LIGHT_DEFAULT_TERM_PROGRAMS = new Set<string>(['Apple_Terminal'])
@@ -447,7 +493,9 @@ export function fromSkin(
   bannerLogo = '',
   bannerHero = '',
   toolPrefix = '',
-  helpHeader = ''
+  helpHeader = '',
+  spinner: Record<string, unknown> | undefined = undefined,
+  toolEmojis: Record<string, string> | undefined = undefined
 ): Theme {
   const d = DEFAULT_THEME
   const c = (k: string) => colors[k]
@@ -495,12 +543,12 @@ export function fromSkin(
         sessionLabel: c('session_label') ?? muted,
         sessionBorder: c('session_border') ?? muted,
 
-        statusBg: d.color.statusBg,
-        statusFg: d.color.statusFg,
-        statusGood: c('ui_ok') ?? d.color.statusGood,
-        statusWarn: c('ui_warn') ?? d.color.statusWarn,
-        statusBad: d.color.statusBad,
-        statusCritical: d.color.statusCritical,
+        statusBg: c('status_bar_bg') ?? d.color.statusBg,
+        statusFg: c('status_bar_text') ?? d.color.statusFg,
+        statusGood: c('status_bar_good') ?? c('ui_ok') ?? d.color.statusGood,
+        statusWarn: c('status_bar_warn') ?? c('ui_warn') ?? d.color.statusWarn,
+        statusBad: c('status_bar_bad') ?? d.color.statusBad,
+        statusCritical: c('status_bar_critical') ?? d.color.statusCritical,
         selectionBg:
           c('selection_bg') ??
           c('completion_menu_current_bg') ??
@@ -526,7 +574,9 @@ export function fromSkin(
       },
 
       bannerLogo,
-      bannerHero
+      bannerHero,
+      spinner: parseSpinner(spinner),
+      toolEmojis: toolEmojis ?? {}
     },
     process.env,
     DEFAULT_LIGHT_MODE
@@ -542,6 +592,8 @@ export function themeFromSkin(skin: GatewaySkin | undefined): Theme {
     skin.banner_logo ?? '',
     skin.banner_hero ?? '',
     skin.tool_prefix ?? '',
-    skin.help_header ?? ''
+    skin.help_header ?? '',
+    skin.spinner,
+    skin.tool_emojis
   )
 }

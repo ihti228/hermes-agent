@@ -86,6 +86,7 @@ describe('tool glyph vocabulary (registry) — identity survives the collapsed v
       skill_manage: '▲',
       skill_view: '▲',
       terminal: '$',
+      todo: '☰',
       web_extract: '●',
       web_search: '●',
       write_file: '◆'
@@ -96,6 +97,13 @@ describe('tool glyph vocabulary (registry) — identity survives the collapsed v
     expect(glyphFor('mcp_railway_deploy')).toBe(DEFAULT_TOOL_GLYPH)
     expect(glyphFor('totally_new_tool')).toBe('◦')
     expect(glyphFor('terminal')).toBe('$')
+  })
+
+  test('skin tool_emojis override the default glyph; absent override keeps default', () => {
+    expect(glyphFor('terminal', { terminal: '⚔' })).toBe('⚔')
+    expect(glyphFor('read_file', { terminal: '⚔' })).toBe('◇') // not overridden → default
+    expect(glyphFor('mcp_x', { mcp_x: '🚀' })).toBe('🚀')
+    expect(glyphFor('terminal', undefined)).toBe('$') // no overrides → default
   })
 })
 

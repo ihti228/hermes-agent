@@ -25,6 +25,7 @@ import { fileRenderer } from './fileTool.tsx'
 import { readRenderer } from './readTool.tsx'
 import { searchRenderer } from './searchTool.tsx'
 import { skillRenderer } from './skillTool.tsx'
+import { todoRenderer } from './todoTool.tsx'
 
 /** Props every tool Body receives: the part + usable content columns. */
 export interface ToolBodyProps {
@@ -71,6 +72,7 @@ export const TOOL_GLYPHS: Record<string, string> = {
   skill_manage: '▲',
   skill_view: '▲',
   terminal: '$',
+  todo: '☰',
   web_extract: '●',
   web_search: '●',
   write_file: '◆'
@@ -79,9 +81,11 @@ export const TOOL_GLYPHS: Record<string, string> = {
 /** Fallback glyph for MCP/unmapped tools. */
 export const DEFAULT_TOOL_GLYPH = '◦'
 
-/** The settled head glyph for a tool name (vocabulary survives the default view). */
-export function glyphFor(name: string): string {
-  return TOOL_GLYPHS[name] ?? DEFAULT_TOOL_GLYPH
+/** The settled head glyph for a tool name (vocabulary survives the default view).
+ *  Skin `tool_emojis` overrides win over the built-in vocabulary, then the
+ *  per-tool default, then the MCP/unknown fallback. */
+export function glyphFor(name: string, overrides?: Record<string, string>): string {
+  return overrides?.[name] ?? TOOL_GLYPHS[name] ?? DEFAULT_TOOL_GLYPH
 }
 
 const TOOLS: Record<string, ToolRenderer> = {
@@ -110,6 +114,9 @@ const TOOLS: Record<string, ToolRenderer> = {
   // skill_view (item 5): WHICH skill was loaded (+ one-line description) —
   // never the full skill contents.
   skill_view: skillRenderer,
+  // todo (panel-primary): collapsed = "N tasks · …" summary; expanded = clean
+  // checklist. The LIVE list is the pinned TodoPanel above the composer.
+  todo: todoRenderer,
   write_file: fileRenderer
 }
 
