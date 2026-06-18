@@ -190,6 +190,44 @@ def _show_notification_wsl(title: str, message: str) -> None:
         logger.warning("WSL notification failed: %s", e)
 
 
+def _show_notification_macos(title: str, message: str) -> None:
+    """Desktop notification on macOS.
+
+    Prefer ``terminal-notifier`` when it's on PATH: it ships a real app
+    bundle, so notifications attribute to it, show as banners, and are
+    grantable in System Settings → Notifications. Plain ``osascript display
+    notification`` attributes to the *launching* process — for an unsigned
+    CLI that often can't register an app entry, so macOS delivers it silently
+    to Notification Center with no banner (and no toggle the user can flip).
+    Install with ``brew install terminal-notifier`` for reliable banners;
+    otherwise fall back to osascript.
+    """
+    tn = shutil.which("terminal-notifier")
+    if tn:
+        try:
+            subprocess.run(
+                [tn, "-title", title, "-message", message],
+                timeout=5, capture_output=True,
+            )
+            logger.debug("notify: macOS notification sent via terminal-notifier")
+            return
+        except Exception as e:
+            logger.debug(
+                "notify: terminal-notifier failed (%s), falling back to osascript", e
+            )
+    try:
+        escaped_title = title.replace('\\', '\\\\').replace('"', '\\"')
+        escaped_message = message.replace('\\', '\\\\').replace('"', '\\"')
+        subprocess.run(
+            ["osascript", "-e",
+             f"display notification \"{escaped_message}\" with title \"{escaped_title}\""],
+            timeout=5, capture_output=True,
+        )
+        logger.debug("notify: macOS notification sent via osascript")
+    except Exception as e:
+        logger.debug("notify: osascript notification failed: %s", e)
+
+
 def _show_desktop_notification(title: str, message: str) -> None:
     """Show a desktop notification bubble.
 
@@ -208,14 +246,7 @@ def _show_desktop_notification(title: str, message: str) -> None:
         elif _SYSTEM == "Linux":
             _show_notification_linux(title, message)
         elif _SYSTEM == "Darwin":
-            escaped_title = title.replace('\\', '\\\\').replace('"', '\\"')
-            escaped_message = message.replace('\\', '\\\\').replace('"', '\\"')
-            subprocess.run(
-                ["osascript", "-e",
-                 f"display notification \"{escaped_message}\" with title \"{escaped_title}\""],
-                timeout=5, capture_output=True,
-            )
-            logger.debug("notify: macOS notification sent via osascript")
+            _show_notification_macos(title, message)
         elif _SYSTEM == "Windows":
             ps_code = (
                 "Add-Type -AssemblyName System.Windows.Forms; "

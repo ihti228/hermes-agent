@@ -76,6 +76,32 @@ def test_consume_is_scoped_to_its_session(home, monkeypatch):
     assert notify_utils.is_notify_pending("sess-a") is True
 
 
+def test_macos_prefers_terminal_notifier_when_present(monkeypatch):
+    runs = []
+    monkeypatch.setattr(notify_utils.shutil, "which",
+                        lambda name: "/opt/homebrew/bin/terminal-notifier")
+    monkeypatch.setattr(notify_utils.subprocess, "run",
+                        lambda argv, **kw: runs.append(argv))
+
+    notify_utils._show_notification_macos("T", "M")
+
+    assert len(runs) == 1
+    assert runs[0][0].endswith("terminal-notifier")
+    assert "-message" in runs[0] and "M" in runs[0]
+
+
+def test_macos_falls_back_to_osascript_without_terminal_notifier(monkeypatch):
+    runs = []
+    monkeypatch.setattr(notify_utils.shutil, "which", lambda name: None)
+    monkeypatch.setattr(notify_utils.subprocess, "run",
+                        lambda argv, **kw: runs.append(argv))
+
+    notify_utils._show_notification_macos("T", "M")
+
+    assert len(runs) == 1
+    assert runs[0][0] == "osascript"
+
+
 def test_key_resolves_from_session_env(home, monkeypatch):
     """When no explicit key is passed, the current session context is used."""
     monkeypatch.setattr(
