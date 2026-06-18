@@ -162,6 +162,8 @@ jobs:
       - name: Launch Hermes-Setup.exe and install it
         shell: pwsh
         timeout-minutes: 5
+        env:
+          HERMES_SETUP_DEV_REPO_ROOT: ${{ env.INSTALL_DIR }}
         run: |
           $installer = "Hermes-Setup.exe"
 
