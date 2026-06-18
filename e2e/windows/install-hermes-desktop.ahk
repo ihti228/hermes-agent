@@ -35,7 +35,6 @@ ClickWithMarker(x, y, button := "Left") {
     ; Perform click
     Click(x, y, button)
 }
-}
 
 
 
