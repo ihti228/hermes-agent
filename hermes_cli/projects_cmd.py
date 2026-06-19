@@ -13,6 +13,7 @@ with zero model-tool schema cost.
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
 
 from hermes_cli import projects_db as pdb
@@ -147,6 +148,28 @@ def _resolve(conn, ident: str):
     return proj
 
 
+def _with_project(fn):
+    """Open the DB, resolve ``args.project``, and run ``fn(args, conn, proj)``.
+
+    Collapses the connect / resolve / not-found(1) / bad-arg(2) boilerplate every
+    project-scoped subcommand repeated.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(args: argparse.Namespace) -> int:
+        with pdb.connect_closing() as conn:
+            proj = _resolve(conn, args.project)
+            if proj is None:
+                return 1
+            try:
+                return fn(args, conn, proj)
+            except ValueError as exc:
+                print(f"project: {exc}", file=sys.stderr)
+                return 2
+
+    return wrapper
+
+
 def _print_project(proj) -> None:
     flags = " (archived)" if proj.archived else ""
     print(f"{proj.slug}  [{proj.id}]{flags}")
@@ -207,66 +230,38 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_show(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        _print_project(proj)
+@_with_project
+def _cmd_show(args, conn, proj) -> int:
+    _print_project(proj)
     return 0
 
 
-def _cmd_add_folder(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        try:
-            path = pdb.add_folder(
-                conn, proj.id, args.path,
-                label=args.label, is_primary=args.primary,
-            )
-        except ValueError as exc:
-            print(f"project: {exc}", file=sys.stderr)
-            return 2
+@_with_project
+def _cmd_add_folder(args, conn, proj) -> int:
+    path = pdb.add_folder(conn, proj.id, args.path, label=args.label, is_primary=args.primary)
     print(f"Added {path} to {proj.slug}")
     return 0
 
 
-def _cmd_remove_folder(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        ok = pdb.remove_folder(conn, proj.id, args.path)
-    if not ok:
+@_with_project
+def _cmd_remove_folder(args, conn, proj) -> int:
+    if not pdb.remove_folder(conn, proj.id, args.path):
         print(f"project: folder not in project: {args.path}", file=sys.stderr)
         return 1
     print(f"Removed {args.path} from {proj.slug}")
     return 0
 
 
-def _cmd_rename(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        try:
-            pdb.update_project(conn, proj.id, name=args.name)
-        except ValueError as exc:
-            print(f"project: {exc}", file=sys.stderr)
-            return 2
+@_with_project
+def _cmd_rename(args, conn, proj) -> int:
+    pdb.update_project(conn, proj.id, name=args.name)
     print(f"Renamed {proj.slug} -> {args.name}")
     return 0
 
 
-def _cmd_set_primary(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        ok = pdb.set_primary(conn, proj.id, args.path)
-    if not ok:
+@_with_project
+def _cmd_set_primary(args, conn, proj) -> int:
+    if not pdb.set_primary(conn, proj.id, args.path):
         print(
             f"project: '{args.path}' is not a folder of {proj.slug}; "
             f"add it first with `hermes project add-folder`.",
@@ -291,36 +286,23 @@ def _cmd_use(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_archive(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        pdb.archive_project(conn, proj.id)
+@_with_project
+def _cmd_archive(args, conn, proj) -> int:
+    pdb.archive_project(conn, proj.id)
     print(f"Archived {proj.slug}")
     return 0
 
 
-def _cmd_restore(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        pdb.restore_project(conn, proj.id)
+@_with_project
+def _cmd_restore(args, conn, proj) -> int:
+    pdb.restore_project(conn, proj.id)
     print(f"Restored {proj.slug}")
     return 0
 
 
-def _cmd_bind_board(args: argparse.Namespace) -> int:
-    with pdb.connect_closing() as conn:
-        proj = _resolve(conn, args.project)
-        if proj is None:
-            return 1
-        try:
-            pdb.update_project(conn, proj.id, board_slug=args.board)
-        except ValueError as exc:
-            print(f"project: {exc}", file=sys.stderr)
-            return 2
+@_with_project
+def _cmd_bind_board(args, conn, proj) -> int:
+    pdb.update_project(conn, proj.id, board_slug=args.board)
     if args.board.strip():
         print(f"Bound {proj.slug} -> board {args.board}")
         _sync_board_default_workdir(proj, args.board)

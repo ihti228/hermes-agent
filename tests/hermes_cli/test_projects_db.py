@@ -45,12 +45,6 @@ def test_record_discovered_repos_replace_drops_stale_rows(conn):
     assert rows == {"/www/alpha": "fresh"}
 
 
-def test_forget_discovered_repo(conn):
-    pdb.record_discovered_repos(conn, [("/www/alpha", "alpha")])
-    assert pdb.forget_discovered_repo(conn, "/www/alpha") is True
-    assert pdb.list_discovered_repos(conn) == []
-
-
 def test_create_get_list(conn):
     pid = pdb.create_project(conn, name="Hermes Agent", folders=["/tmp/hermes"])
     proj = pdb.get_project(conn, pid)
@@ -146,7 +140,6 @@ def test_active_pointer(conn):
 
     pdb.set_active(conn, pid)
     assert pdb.get_active_id(conn) == pid
-    assert pdb.get_active(conn).id == pid
 
     pdb.set_active(conn, None)
     assert pdb.get_active_id(conn) is None
@@ -175,12 +168,7 @@ def test_per_profile_isolation(tmp_path):
         b.close()
 
 
-def test_db_path_honors_env_override(tmp_path, monkeypatch):
-    target = tmp_path / "custom" / "projects.db"
-    monkeypatch.setenv("HERMES_PROJECTS_DB", str(target))
-
-    assert pdb.projects_db_path() == target
-    monkeypatch.delenv("HERMES_PROJECTS_DB", raising=False)
-    # Falls back under HERMES_HOME (set by the autouse isolation fixture).
+def test_db_path_under_hermes_home():
+    # Resolves under HERMES_HOME (set by the autouse isolation fixture).
     assert pdb.projects_db_path().name == "projects.db"
     assert os.path.basename(str(pdb.projects_db_path().parent))  # non-empty parent

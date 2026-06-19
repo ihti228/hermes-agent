@@ -182,7 +182,7 @@ export function mergeRepoWorktreeGroups(
 // needs the backend common-root probe, so those rows are left for the next
 // tree refresh; the common case (a new main-checkout session) overlays here.
 
-const sessionRecency = (session: SessionInfo): number => session.last_active || session.started_at || 0
+export const sessionRecency = (session: SessionInfo): number => session.last_active || session.started_at || 0
 
 /** True when `target` equals `folder` or is nested under it (segment-wise). */
 function isPathUnder(folder: string, target: string): boolean {

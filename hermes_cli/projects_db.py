@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from hermes_cli.sqlite_util import add_column_if_missing as _add_column_if_missing, write_txn
 from hermes_constants import get_hermes_home
 
 # ---------------------------------------------------------------------------
@@ -41,15 +42,11 @@ from hermes_constants import get_hermes_home
 
 
 def projects_db_path() -> Path:
-    """Return the per-profile projects DB path (``$HERMES_HOME/projects.db``).
+    """The per-profile projects DB path (``$HERMES_HOME/projects.db``).
 
-    Honours ``HERMES_PROJECTS_DB`` as an explicit override for tests and
-    unusual deployments. Profile-aware: ``get_hermes_home()`` already points
-    at the active profile's home.
+    Profile-aware: ``get_hermes_home()`` already points at the active profile's
+    home. Tests pass an explicit ``db_path`` to :func:`connect`.
     """
-    override = os.environ.get("HERMES_PROJECTS_DB", "").strip()
-    if override:
-        return Path(override).expanduser()
     return get_hermes_home() / "projects.db"
 
 
@@ -201,19 +198,6 @@ def connect_closing(db_path: Optional[Path] = None):
             pass
 
 
-def _add_column_if_missing(
-    conn: sqlite3.Connection, table: str, column: str, ddl: str
-) -> bool:
-    """``ALTER TABLE <table> ADD COLUMN <ddl>``, idempotent across races."""
-    try:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
-        return True
-    except sqlite3.OperationalError as exc:
-        if "duplicate column name" in str(exc).lower():
-            return False
-        raise
-
-
 def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
     """Add columns introduced after v1 to legacy DBs (safe on every open)."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
@@ -225,22 +209,6 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "projects", "icon", "icon TEXT")
     if "color" not in cols:
         _add_column_if_missing(conn, "projects", "color", "color TEXT")
-
-
-@contextlib.contextmanager
-def write_txn(conn: sqlite3.Connection):
-    """Context manager for an IMMEDIATE write transaction."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        yield conn
-    except Exception:
-        try:
-            conn.execute("ROLLBACK")
-        except sqlite3.OperationalError:
-            pass
-        raise
-    else:
-        conn.execute("COMMIT")
 
 
 # ---------------------------------------------------------------------------
@@ -648,13 +616,6 @@ def get_active_id(conn: sqlite3.Connection) -> Optional[str]:
     return row["value"] if row else None
 
 
-def get_active(conn: sqlite3.Connection) -> Optional[Project]:
-    pid = get_active_id(conn)
-    if not pid:
-        return None
-    return get_project(conn, pid)
-
-
 # ---------------------------------------------------------------------------
 # Discovered repos (filesystem scan cache)
 # ---------------------------------------------------------------------------
@@ -705,14 +666,6 @@ def list_discovered_repos(conn: sqlite3.Connection) -> List[dict]:
         {"root": r["root"], "label": r["label"], "last_seen": r["last_seen"]}
         for r in rows
     ]
-
-
-def forget_discovered_repo(conn: sqlite3.Connection, root: str) -> bool:
-    """Drop a single cached repo (e.g. user dismissed it)."""
-    norm = _normalize_path(root)
-    with write_txn(conn):
-        cur = conn.execute("DELETE FROM discovered_repos WHERE root = ?", (norm,))
-    return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------------------

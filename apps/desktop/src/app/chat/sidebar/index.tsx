@@ -153,6 +153,7 @@ import {
   mergeRepoWorktreeGroups,
   overlayLiveLanes,
   overlayLivePreviews,
+  sessionRecency as sessionTime,
   type SidebarProjectTree,
   type SidebarSessionGroup,
   type SidebarWorkspaceTree
@@ -257,10 +258,13 @@ function ReorderableList({
 }
 
 const countLabel = (loaded: number, total: number) => (total > loaded ? `${loaded}/${total}` : String(loaded))
-const sessionTime = (s: SessionInfo) => s.last_active || s.started_at || 0
 
 const pathListKey = (paths: string[]) =>
   paths.map(path => path.trim()).filter(Boolean).sort((a, b) => a.localeCompare(b)).join('\n')
+
+// minmax(0,1fr): pin the single column to the rail width so long labels truncate
+// instead of shoving controls off-screen.
+const SIDEBAR_STACK = 'grid grid-cols-[minmax(0,1fr)] gap-px'
 
 // Every session in a project, across its repos/worktrees (order-agnostic).
 const projectSessions = (project: SidebarProjectTree): SessionInfo[] =>
@@ -1948,9 +1952,7 @@ function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemove }: Si
   }
 
   return (
-    // minmax(0,1fr): pin the single column to the rail width so long labels
-    // truncate instead of shoving controls off-screen.
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-px">
+    <div className={SIDEBAR_STACK}>
       <WorkspaceHeader
         action={
           (onNewSession || isProfileGroup || onRemove) && (
@@ -2080,7 +2082,7 @@ function ProjectOverviewRow({
         <ProjectMenu isActive={isActive} project={project} />
       </div>
       {preview.length > 0 && (
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-px pb-1 pl-4">{renderRows?.(preview)}</div>
+        <div className={cn(SIDEBAR_STACK, 'pb-1 pl-4')}>{renderRows?.(preview)}</div>
       )}
     </div>
   )
@@ -2189,7 +2191,7 @@ function RepoFlatSection({
   }
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-px">
+    <div className={SIDEBAR_STACK}>
       <WorkspaceHeader
         action={
           onNewSession && <WorkspaceAddButton label={s.newSessionIn(repo.label)} onClick={() => onNewSession(repo.path)} />
@@ -2201,7 +2203,7 @@ function RepoFlatSection({
         onToggle={toggleOpen}
         open={open}
       />
-      {open && <div className="grid grid-cols-[minmax(0,1fr)] gap-px pl-2.5">{body}</div>}
+      {open && <div className={cn(SIDEBAR_STACK, 'pl-2.5')}>{body}</div>}
     </div>
   )
 }

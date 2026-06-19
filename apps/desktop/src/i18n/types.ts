@@ -905,22 +905,18 @@ export interface Translations {
       createDesc: string
       renameTitle: string
       addFolderTitle: string
-      nameLabel: string
       namePlaceholder: string
       foldersLabel: string
       noFolders: string
       addFolder: string
       primaryBadge: string
-      setPrimary: string
       removeFolder: string
       create: string
       menu: string
       menuRename: string
       menuAddFolder: string
       menuSetActive: string
-      menuArchive: string
       menuDelete: string
-      menuSave: string
       reveal: string
       copyPath: string
       removeFromSidebar: string
@@ -932,12 +928,9 @@ export interface Translations {
       startWorkFailed: string
       removeWorktree: string
       removeWorktreeFailed: string
-      allProjects: string
-      backToAll: string
       enter: (label: string) => string
     }
     newSessionIn: (label: string) => string
-    reorderWorkspace: (label: string) => string
     showMoreIn: (count: number, label: string) => string
     loading: string
     loadMore: string

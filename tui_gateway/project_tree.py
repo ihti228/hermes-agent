@@ -28,8 +28,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Optional
 
-# A cwd -> git identity resolver. Returns ``{"repo_root", "worktree_root", "branch"?}``
-# where ``repo_root`` is the COMMON (main) repo root shared across worktrees and
+# A cwd -> git identity resolver. Returns ``{"repo_root", "worktree_root"}`` where
+# ``repo_root`` is the COMMON (main) repo root shared across worktrees and
 # ``worktree_root`` is this cwd's own checkout root. Returns ``None`` when the
 # cwd is not in a git repo (or cannot be probed, e.g. a remote backend).
 Resolve = Callable[[str], Optional[dict]]
@@ -142,7 +142,7 @@ def _place(cwd: str, branch: str, resolve: Optional[Resolve], persisted_root: st
         if kanban_dir:
             return _placement(repo_root, _kanban_lane_id(repo_root), "kanban", kanban_dir, False, True)
 
-        label = (info.get("branch") or "").strip() or base_name(worktree_root) or worktree_root
+        label = base_name(worktree_root) or worktree_root
         return _placement(repo_root, worktree_root, label, worktree_root, False, False)
 
     # No live probe: trust the backend-persisted root (group by it, split main by
@@ -294,21 +294,25 @@ def _build_repos(sessions: list[dict], resolve: Optional[Resolve], hydrate: bool
 # ---------------------------------------------------------------------------
 
 
-def _project_for_path(projects: list[dict], target: str) -> Optional[dict]:
+def _project_match(projects: list[dict], target: str) -> tuple[Optional[dict], int]:
+    """The project owning ``target`` by longest-prefix folder match + its depth."""
     target = (target or "").strip()
-    if not target:
-        return None
     best: Optional[dict] = None
     best_len = -1
-    for project in projects:
-        for folder in project.get("folders") or []:
-            path = folder.get("path") or ""
-            if _is_path_under(path, target):
-                length = len(_segments(path))
-                if length > best_len:
-                    best_len = length
-                    best = project
-    return best
+    if target:
+        for project in projects:
+            for folder in project.get("folders") or []:
+                path = folder.get("path") or ""
+                if _is_path_under(path, target):
+                    length = len(_segments(path))
+                    if length > best_len:
+                        best_len = length
+                        best = project
+    return best, best_len
+
+
+def _project_for_path(projects: list[dict], target: str) -> Optional[dict]:
+    return _project_match(projects, target)[0]
 
 
 def _project_for_session(session: dict, projects: list[dict], resolve: Optional[Resolve]) -> Optional[dict]:
@@ -321,15 +325,10 @@ def _project_for_session(session: dict, projects: list[dict], resolve: Optional[
     best: Optional[dict] = None
     best_len = -1
     for target in candidates:
-        match = _project_for_path(projects, target)
-        if not match:
-            continue
-        for folder in match.get("folders") or []:
-            if _is_path_under(folder.get("path") or "", target):
-                length = len(_segments(folder.get("path") or ""))
-                if length > best_len:
-                    best_len = length
-                    best = match
+        match, length = _project_match(projects, target)
+        if match and length > best_len:
+            best_len = length
+            best = match
     return best
 
 

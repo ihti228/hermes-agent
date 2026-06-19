@@ -44,7 +44,6 @@ const { readWindowsUserEnvVar } = require('./windows-user-env.cjs')
 const { readDirForIpc } = require('./fs-read-dir.cjs')
 const { gitRootForIpc } = require('./git-root.cjs')
 const { addWorktree, listWorktrees, removeWorktree } = require('./git-worktree-ops.cjs')
-const { worktreesForIpc } = require('./git-worktrees.cjs')
 const { scanGitRepos } = require('./git-repo-scan.cjs')
 const { OFFICIAL_REPO_HTTPS_URL, isOfficialSshRemote } = require('./update-remote.cjs')
 const { runRebuildWithRetry } = require('./update-rebuild.cjs')
@@ -6057,8 +6056,6 @@ ipcMain.handle('hermes:fs:reveal', async (_event, targetPath) => {
     return false
   }
 })
-
-ipcMain.handle('hermes:fs:worktrees', async (_event, cwds) => worktreesForIpc(cwds))
 
 // Git-driven worktree management ("Start work" flow). Errors surface to the
 // renderer as rejected promises so it can toast a friendly message.
