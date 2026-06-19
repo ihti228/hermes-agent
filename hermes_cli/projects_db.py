@@ -625,22 +625,25 @@ def delete_project(conn: sqlite3.Connection, project_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+_ACTIVE_META_KEY = "active_id"
+
+
 def set_active(conn: sqlite3.Connection, project_id: Optional[str]) -> None:
     """Set (or clear, when ``None``) the active project pointer."""
     with write_txn(conn):
         if project_id is None:
-            conn.execute("DELETE FROM project_meta WHERE key = 'active_id'")
+            conn.execute("DELETE FROM project_meta WHERE key = ?", (_ACTIVE_META_KEY,))
         else:
             conn.execute(
-                "INSERT INTO project_meta (key, value) VALUES ('active_id', ?) "
+                "INSERT INTO project_meta (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (project_id,),
+                (_ACTIVE_META_KEY, project_id),
             )
 
 
 def get_active_id(conn: sqlite3.Connection) -> Optional[str]:
     row = conn.execute(
-        "SELECT value FROM project_meta WHERE key = 'active_id'"
+        "SELECT value FROM project_meta WHERE key = ?", (_ACTIVE_META_KEY,)
     ).fetchone()
     return row["value"] if row else None
 

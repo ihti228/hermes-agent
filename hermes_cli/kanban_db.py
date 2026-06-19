@@ -2295,9 +2295,8 @@ def create_task(
                             project_repo, ".worktrees", task_id
                         )
                     if not branch_name:
+                        # _pdb was imported above when project_obj was resolved.
                         try:
-                            from hermes_cli import projects_db as _pdb
-
                             branch_name = _pdb.branch_name_for(
                                 project_obj, task_id, title=title or ""
                             )

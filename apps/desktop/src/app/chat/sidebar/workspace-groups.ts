@@ -71,6 +71,12 @@ export function kanbanWorktreeDir(path: string): null | string {
   return path.match(KANBAN_DIR_RE)?.[1] ?? null
 }
 
+/** Label for a main-checkout lane whose session recorded no branch. */
+export const DEFAULT_BRANCH_LABEL = 'main'
+
+/** The one definition of a main-checkout lane id (must match the backend tree). */
+export const branchLaneId = (repoRoot: string, branch?: string): string => `${repoRoot}::branch::${(branch ?? '').trim()}`
+
 /** Default-branch names that sort first and read as the repo's trunk. */
 const TRUNK_BRANCHES = new Set(['main', 'master', 'trunk', 'develop'])
 
@@ -126,8 +132,8 @@ export function mergeRepoWorktreeGroups(
     }
 
     if (worktree.isMain) {
-      const branch = (worktree.branch?.trim() || 'main').trim()
-      const id = `${repo.id}::branch::${branch}`
+      const branch = worktree.branch?.trim() || DEFAULT_BRANCH_LABEL
+      const id = branchLaneId(repo.id, branch)
 
       if (seenIds.has(id) || hasMainLane(branch)) {
         continue
@@ -245,8 +251,8 @@ export function placeLiveSession(session: SessionInfo, explicitProjects: Project
   return {
     projectId,
     repoRoot,
-    laneId: branch ? `${repoRoot}::branch::${branch}` : `${repoRoot}::branch::`,
-    laneLabel: branch || 'main',
+    laneId: branchLaneId(repoRoot, branch),
+    laneLabel: branch || DEFAULT_BRANCH_LABEL,
     lanePath: repoRoot
   }
 }

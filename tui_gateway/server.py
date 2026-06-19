@@ -8392,6 +8392,9 @@ def _discover_repos_payload(db) -> list[dict]:
 
     repos: dict[str, dict] = {}
 
+    def _agg(root: str) -> dict:
+        return repos.setdefault(root, {"root": root, "label": "", "sessions": 0, "last_active": 0.0})
+
     # Session-derived roots (probe each distinct cwd, cached) + backfill the column.
     cwd_to_root: dict[str, str] = {}
     for row in db.distinct_session_cwds():
@@ -8402,7 +8405,7 @@ def _discover_repos_payload(db) -> list[dict]:
         cwd_to_root[cwd] = root
         if _is_junk(root):
             continue
-        agg = repos.setdefault(root, {"root": root, "label": "", "sessions": 0, "last_active": 0.0})
+        agg = _agg(root)
         agg["sessions"] += int(row.get("sessions") or 0)
         agg["last_active"] = max(agg["last_active"], float(row.get("last_active") or 0))
 
@@ -8420,7 +8423,7 @@ def _discover_repos_payload(db) -> list[dict]:
                 root = str(entry.get("root") or "")
                 if not root or _is_junk(root):
                     continue
-                agg = repos.setdefault(root, {"root": root, "label": "", "sessions": 0, "last_active": 0.0})
+                agg = _agg(root)
                 if entry.get("label"):
                     agg["label"] = entry["label"]
                 agg["last_active"] = max(agg["last_active"], float(entry.get("last_seen") or 0))

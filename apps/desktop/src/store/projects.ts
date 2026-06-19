@@ -12,9 +12,6 @@ import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
 
 export const $projects = atom<ProjectInfo[]>([])
 export const $activeProjectId = atom<null | string>(null)
-// True once a list response has landed, so the sidebar can distinguish
-// "no projects yet" from "haven't loaded".
-export const $projectsLoaded = atom(false)
 
 // The authoritative project -> repo -> lane tree (overview), served by
 // `projects.tree`. Lanes carry counts + structure; per-project session rows are
@@ -81,7 +78,6 @@ async function gatewayRequest<T>(method: string, params: Record<string, unknown>
 function applyPayload(payload: ProjectsPayload): void {
   $projects.set(payload.projects ?? [])
   $activeProjectId.set(payload.active_id ?? null)
-  $projectsLoaded.set(true)
 }
 
 // Pull the full project list + active pointer. Best-effort: a failure (gateway
@@ -194,20 +190,6 @@ export async function renameProject(id: string, name: string): Promise<void> {
   await refreshProjects()
 }
 
-export async function updateProject(
-  id: string,
-  patch: { description?: string; icon?: string; color?: string; boardSlug?: string }
-): Promise<void> {
-  await gatewayRequest('projects.update', {
-    id,
-    description: patch.description,
-    icon: patch.icon,
-    color: patch.color,
-    board_slug: patch.boardSlug
-  })
-  await refreshProjects()
-}
-
 export async function addProjectFolder(
   id: string,
   path: string,
@@ -222,20 +204,6 @@ export async function addProjectFolder(
   await refreshProjects()
 }
 
-export async function removeProjectFolder(id: string, path: string): Promise<void> {
-  await gatewayRequest('projects.remove_folder', { id, path })
-  await refreshProjects()
-}
-
-export async function setProjectPrimary(id: string, path: string): Promise<void> {
-  await gatewayRequest('projects.set_primary', { id, path })
-  await refreshProjects()
-}
-
-export async function archiveProject(id: string, restore = false): Promise<void> {
-  applyPayload(await gatewayRequest<ProjectsPayload>('projects.archive', { id, restore }))
-}
-
 export async function deleteProject(id: string): Promise<void> {
   applyPayload(await gatewayRequest<ProjectsPayload>('projects.delete', { id }))
 }
@@ -243,13 +211,6 @@ export async function deleteProject(id: string): Promise<void> {
 export async function setActiveProject(id: null | string): Promise<void> {
   const res = await gatewayRequest<{ active_id: null | string }>('projects.set_active', { id })
   $activeProjectId.set(res.active_id ?? null)
-}
-
-// Resolve which project owns a path (longest-prefix folder match) + its branch.
-export async function projectForCwd(
-  cwd: string
-): Promise<{ project: ProjectInfo | null; cwd: string; branch: string }> {
-  return gatewayRequest('projects.for_cwd', { cwd })
 }
 
 // ── Project management dialog ────────────────────────────────────────────────

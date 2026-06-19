@@ -36,6 +36,16 @@ Resolve = Callable[[str], Optional[dict]]
 
 _KANBAN_DIR_RE = re.compile(r"^(.*[/\\]\.worktrees)[/\\][^/\\]+[/\\]?$")
 _TRUNK_BRANCHES = {"main", "master", "trunk", "develop"}
+DEFAULT_BRANCH_LABEL = "main"
+
+
+def _branch_lane_id(repo_root: str, branch: str = "") -> str:
+    """The one definition of a main-checkout lane id (must match the desktop)."""
+    return f"{repo_root}::branch::{(branch or '').strip()}"
+
+
+def _kanban_lane_id(repo_root: str) -> str:
+    return f"{repo_root}::kanban"
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +116,7 @@ def _place_by_heuristic(path: str) -> Optional[dict]:
     kanban_dir = kanban_worktree_dir(path)
     if kanban_dir:
         repo_path = re.sub(r"[/\\]+$", "", _with_base_name(kanban_dir, ""))
-        return _placement(repo_path, f"{repo_path}::kanban", "kanban", kanban_dir, False, True)
+        return _placement(repo_path, _kanban_lane_id(repo_path), "kanban", kanban_dir, False, True)
 
     m = re.match(r"^(.+)-wt-(.+)$", base)
     if m:
@@ -126,12 +136,11 @@ def _place(cwd: str, branch: str, resolve: Optional[Resolve], persisted_root: st
 
         if is_main:
             b = (branch or "").strip()
-            lane_key = f"{repo_root}::branch::{b}" if b else f"{repo_root}::branch::"
-            return _placement(repo_root, lane_key, b or "main", repo_root, True, False)
+            return _placement(repo_root, _branch_lane_id(repo_root, b), b or DEFAULT_BRANCH_LABEL, repo_root, True, False)
 
         kanban_dir = kanban_worktree_dir(worktree_root)
         if kanban_dir:
-            return _placement(repo_root, f"{repo_root}::kanban", "kanban", kanban_dir, False, True)
+            return _placement(repo_root, _kanban_lane_id(repo_root), "kanban", kanban_dir, False, True)
 
         label = (info.get("branch") or "").strip() or base_name(worktree_root) or worktree_root
         return _placement(repo_root, worktree_root, label, worktree_root, False, False)
@@ -141,10 +150,9 @@ def _place(cwd: str, branch: str, resolve: Optional[Resolve], persisted_root: st
     if persisted_root:
         kanban_dir = kanban_worktree_dir(cwd)
         if kanban_dir:
-            return _placement(persisted_root, f"{persisted_root}::kanban", "kanban", kanban_dir, False, True)
+            return _placement(persisted_root, _kanban_lane_id(persisted_root), "kanban", kanban_dir, False, True)
         b = (branch or "").strip()
-        lane_key = f"{persisted_root}::branch::{b}" if b else f"{persisted_root}::branch::"
-        return _placement(persisted_root, lane_key, b or "main", persisted_root, True, False)
+        return _placement(persisted_root, _branch_lane_id(persisted_root, b), b or DEFAULT_BRANCH_LABEL, persisted_root, True, False)
 
     return _place_by_heuristic(cwd)
 

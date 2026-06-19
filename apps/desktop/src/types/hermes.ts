@@ -559,15 +559,6 @@ export interface ProjectsPayload {
   active_id: null | string
 }
 
-// A git repo for the overview — filesystem-scanned (cached) or session-derived,
-// served by `projects.discover_repos` / persisted via `projects.record_repos`.
-export interface DiscoveredRepo {
-  root: string
-  label: string
-  sessions: number
-  last_active: number
-}
-
 export interface ProfileSoul {
   content: string
   exists: boolean

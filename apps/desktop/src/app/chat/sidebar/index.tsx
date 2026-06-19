@@ -1207,15 +1207,6 @@ export function ChatSidebar({
     setSidebarSessionOrderIds(ids)
   }
 
-  const reorderParents = (ids: string[]) => setSidebarWorkspaceParentOrderIds(ids)
-
-  // Worktrees persist as one flat list (orderByIds applies it per parent), so a
-  // single parent's new worktree order is spliced back over its slice.
-  const reorderWorktree = (parentId: string, ids: string[]) =>
-    setSidebarWorkspaceOrderIds(
-      activeRepoTrees.flatMap(parent => (parent.id === parentId ? ids : parent.groups.map(group => group.id)))
-    )
-
   // Sortable rows carry live session ids; the pinned store is keyed by durable
   // (lineage-root) ids, so translate before persisting the new order.
   const reorderPinned = (ids: string[]) =>
@@ -1498,9 +1489,7 @@ export function ChatSidebar({
                 onDeleteSession={onDeleteSession}
                 onEnterProject={onEnterProject}
                 onNewSessionInWorkspace={showAllProfiles ? undefined : onNewSessionInWorkspace}
-                onReorderParents={showAllProfiles ? undefined : reorderParents}
                 onReorderSessions={showAllProfiles ? undefined : reorderSessions}
-                onReorderWorktree={showAllProfiles ? undefined : reorderWorktree}
                 onResumeSession={onResumeSession}
                 onToggle={() => setSidebarRecentsOpen(!agentsOpen)}
                 onTogglePin={pinSession}
@@ -1732,12 +1721,9 @@ interface SidebarSessionsSectionProps {
   // When false the section header is static (no caret/toggle) and always open.
   collapsible?: boolean
   sortable?: boolean
-  // Per-level reorder callbacks. Each is optional; a list is draggable iff its
-  // callback is supplied. The flat session list, the repo parents, and a parent's
-  // worktrees each own an independent ReorderableList, so nothing collides.
+  // The flat session list is the only hand-reorderable surface (grouped/project
+  // views sort deterministically), so it owns the one ReorderableList.
   onReorderSessions?: (ids: string[]) => void
-  onReorderParents?: (ids: string[]) => void
-  onReorderWorktree?: (parentId: string, ids: string[]) => void
   dndSensors?: ReturnType<typeof useSensors>
 }
 
@@ -1761,7 +1747,6 @@ function SidebarSessionsSection({
   headerAction,
   footer,
   groups,
-  tree,
   projectOverview,
   projectOverviewPreviews,
   projectsLoading = false,
@@ -1775,12 +1760,9 @@ function SidebarSessionsSection({
   collapsible = true,
   sortable = false,
   onReorderSessions,
-  onReorderParents,
-  onReorderWorktree,
   dndSensors
 }: SidebarSessionsSectionProps) {
   const sectionOpen = collapsible ? open : true
-  const hasTreeSessions = Boolean(tree?.some(parent => parent.sessionCount > 0))
   const hasGroupedSessions = Boolean(groups?.some(group => group.sessions.length > 0))
   // A defined project list is itself content (even an empty project should
   // render as a drill-in row so the user can see it exists).
@@ -1789,11 +1771,7 @@ function SidebarSessionsSection({
 
   const showEmptyState =
     forceEmptyState ||
-    (!hasGroupedSessions &&
-      !hasTreeSessions &&
-      !hasProjectOverview &&
-      !hasProjectContent &&
-      sessions.length === 0)
+    (!hasGroupedSessions && !hasProjectOverview && !hasProjectContent && sessions.length === 0)
 
   // The flat recents/pinned list is the only place sessions reorder by hand;
   // grouped/tree views always sort by creation date and never drag.
@@ -1824,7 +1802,6 @@ function SidebarSessionsSection({
   const flatVirtualized =
     !showEmptyState &&
     !groups?.length &&
-    !tree?.length &&
     !projectOverview?.length &&
     !projectContent &&
     sessions.length >= VIRTUALIZE_THRESHOLD
@@ -1862,34 +1839,6 @@ function SidebarSessionsSection({
         renderRows={renderRows}
       />
     ))
-  } else if (tree?.length) {
-    const parentNodes = tree.map(parent =>
-      onReorderParents ? (
-        <SortableSidebarWorkspaceParent
-          dndSensors={dndSensors}
-          key={parent.id}
-          onNewSession={onNewSessionInWorkspace}
-          onReorderWorktree={onReorderWorktree}
-          parent={parent}
-          renderRows={renderRows}
-        />
-      ) : (
-        <SidebarWorkspaceParent
-          key={parent.id}
-          onNewSession={onNewSessionInWorkspace}
-          parent={parent}
-          renderRows={renderRows}
-        />
-      )
-    )
-
-    inner = onReorderParents ? (
-      <ReorderableList ids={tree.map(parent => parent.id)} onReorder={onReorderParents} sensors={dndSensors}>
-        {parentNodes}
-      </ReorderableList>
-    ) : (
-      parentNodes
-    )
   } else if (groups?.length) {
     // Profile/source groups never reorder; render them flat with static rows.
     inner = groups.map(group => (
@@ -1954,31 +1903,16 @@ function SidebarSessionsSection({
   )
 }
 
-interface SidebarWorkspaceGroupProps extends React.ComponentProps<'div'> {
+interface SidebarWorkspaceGroupProps {
   group: SidebarSessionGroup
   renderRows: (sessions: SessionInfo[]) => React.ReactNode
   onNewSession?: (path: null | string) => void
   // When set (linked worktree rows), shows a remove affordance that runs a real
   // `git worktree remove`.
   onRemove?: () => void
-  reorderable?: boolean
-  dragging?: boolean
-  dragHandleProps?: React.HTMLAttributes<HTMLElement>
 }
 
-function SidebarWorkspaceGroup({
-  group,
-  renderRows,
-  onNewSession,
-  onRemove,
-  reorderable = false,
-  dragging = false,
-  dragHandleProps,
-  className,
-  style,
-  ref,
-  ...rest
-}: SidebarWorkspaceGroupProps) {
+function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemove }: SidebarWorkspaceGroupProps) {
   const { t } = useI18n()
   const s = t.sidebar
   const isProfileGroup = group.mode === 'profile'
@@ -1994,8 +1928,7 @@ function SidebarWorkspaceGroup({
   const hiddenCount = Math.max(0, totalCount - visibleSessions.length)
   const nextCount = Math.min(pageStep, hiddenCount)
 
-  // Leading glyph: profile color dot, platform avatar, or a branch mark for a
-  // worktree. When reorderable it doubles as the drag handle (icon ↔ grabber).
+  // Leading glyph: profile color dot, or a branch/kanban mark for a worktree.
   const leadingIcon = group.color ? (
     <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
   ) : (
@@ -2015,23 +1948,9 @@ function SidebarWorkspaceGroup({
   }
 
   return (
-    <div
-      className={cn(
-        // While lifted, paint the opaque sidebar surface so the dragged group
-        // erases the rows it floats over instead of ghosting them through a
-        // translucent body.
-        // minmax(0,1fr): pin the single column to the rail width. A bare `grid`
-        // auto column sizes to the widest child's MAX-content (the full,
-        // untruncated label), overflowing the rail so overflow-x-hidden clips the
-        // +/grabber off-screen — the inner truncate never gets a bounded width.
-        'grid grid-cols-[minmax(0,1fr)] gap-px data-[dragging=true]:z-10 data-[dragging=true]:rounded-md data-[dragging=true]:bg-(--ui-sidebar-surface-background) data-[dragging=true]:will-change-transform',
-        className
-      )}
-      data-dragging={dragging ? 'true' : undefined}
-      ref={ref}
-      style={style}
-      {...rest}
-    >
+    // minmax(0,1fr): pin the single column to the rail width so long labels
+    // truncate instead of shoving controls off-screen.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-px">
       <WorkspaceHeader
         action={
           (onNewSession || isProfileGroup || onRemove) && (
@@ -2062,13 +1981,10 @@ function SidebarWorkspaceGroup({
           )
         }
         count={isProfileGroup ? countLabel(visibleSessions.length, totalCount) : group.sessions.length}
-        dragging={dragging}
-        dragHandleProps={dragHandleProps}
         icon={leadingIcon}
         label={group.label}
         onToggle={toggleOpen}
         open={open}
-        reorderable={reorderable}
       />
       {open && (
         <>
@@ -2095,140 +2011,6 @@ function SidebarWorkspaceGroup({
       )}
     </div>
   )
-}
-
-interface SortableWorkspaceProps {
-  group: SidebarSessionGroup
-  renderRows: (sessions: SessionInfo[]) => React.ReactNode
-  onNewSession?: (path: null | string) => void
-}
-
-function SortableSidebarWorkspaceGroup(props: SortableWorkspaceProps) {
-  return <SidebarWorkspaceGroup {...props} {...useSortableBindings(props.group.id)} />
-}
-
-interface SidebarWorkspaceParentProps extends React.ComponentProps<'div'> {
-  parent: SidebarWorkspaceTree
-  renderRows: (sessions: SessionInfo[]) => React.ReactNode
-  onNewSession?: (path: null | string) => void
-  // When set, this parent's worktrees reorder inside their OWN ReorderableList, so a
-  // worktree drag only ever collides with its siblings — never the repos around it.
-  onReorderWorktree?: (parentId: string, ids: string[]) => void
-  dndSensors?: ReturnType<typeof useSensors>
-  // Whether this parent itself is draggable (set by useSortableBindings).
-  reorderable?: boolean
-  dragging?: boolean
-  dragHandleProps?: React.HTMLAttributes<HTMLElement>
-}
-
-// Top level of the worktree tree: a repo header whose body is the repo's
-// worktrees (each a SidebarWorkspaceGroup), indented one step.
-function SidebarWorkspaceParent({
-  parent,
-  renderRows,
-  onNewSession,
-  onReorderWorktree,
-  dndSensors,
-  reorderable = false,
-  dragging = false,
-  dragHandleProps,
-  className,
-  style,
-  ref,
-  ...rest
-}: SidebarWorkspaceParentProps) {
-  const { t } = useI18n()
-  const s = t.sidebar
-  const [open, toggleOpen] = useWorkspaceNodeOpen(parent.id)
-  const [visibleCount, setVisibleCount] = useState(SIDEBAR_GROUP_PAGE)
-
-  // A repo with a single worktree has no second level worth showing: collapse it
-  // to one row (repo header → its sessions directly), only nesting when there
-  // are 2+ worktrees to choose between.
-  const soleWorktree = parent.groups.length === 1 ? parent.groups[0] : null
-  const newSessionPath = soleWorktree ? soleWorktree.path : parent.path
-  const visibleSessions = soleWorktree ? soleWorktree.sessions.slice(0, visibleCount) : []
-  const hiddenCount = soleWorktree ? Math.max(0, soleWorktree.sessions.length - visibleSessions.length) : 0
-
-  const groupNodes = parent.groups.map(group =>
-    onReorderWorktree ? (
-      <SortableSidebarWorkspaceGroup group={group} key={group.id} onNewSession={onNewSession} renderRows={renderRows} />
-    ) : (
-      <SidebarWorkspaceGroup group={group} key={group.id} onNewSession={onNewSession} renderRows={renderRows} />
-    )
-  )
-
-  return (
-    <div
-      className={cn(
-        'grid grid-cols-[minmax(0,1fr)] gap-px data-[dragging=true]:z-10 data-[dragging=true]:rounded-md data-[dragging=true]:bg-(--ui-sidebar-surface-background) data-[dragging=true]:will-change-transform',
-        className
-      )}
-      data-dragging={dragging ? 'true' : undefined}
-      ref={ref}
-      style={style}
-      {...rest}
-    >
-      <WorkspaceHeader
-        action={
-          onNewSession && (newSessionPath || soleWorktree) && (
-            <WorkspaceAddButton label={s.newSessionIn(parent.label)} onClick={() => onNewSession?.(newSessionPath)} />
-          )
-        }
-        count={parent.sessionCount}
-        dragging={dragging}
-        dragHandleProps={dragHandleProps}
-        emphasis
-        icon={<Codicon className="shrink-0 text-(--ui-text-tertiary)" name="repo" size="0.75rem" />}
-        label={parent.label}
-        onToggle={toggleOpen}
-        open={open}
-        reorderable={reorderable}
-      />
-      {open &&
-        (soleWorktree ? (
-          // Collapsed: the repo's sessions hang straight off the header.
-          <>
-            {renderRows(visibleSessions)}
-            {hiddenCount > 0 && (
-              <WorkspaceShowMoreButton
-                count={Math.min(SIDEBAR_GROUP_PAGE, hiddenCount)}
-                label={parent.label}
-                onClick={() => setVisibleCount(count => count + SIDEBAR_GROUP_PAGE)}
-              />
-            )}
-          </>
-        ) : (
-          // Indent the worktrees under their repo; keep the column pinned to the
-          // rail so long branch labels truncate instead of shoving controls off.
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-px pl-2.5">
-            {onReorderWorktree ? (
-              <ReorderableList
-                ids={parent.groups.map(group => group.id)}
-                onReorder={ids => onReorderWorktree(parent.id, ids)}
-                sensors={dndSensors}
-              >
-                {groupNodes}
-              </ReorderableList>
-            ) : (
-              groupNodes
-            )}
-          </div>
-        ))}
-    </div>
-  )
-}
-
-interface SortableWorkspaceParentProps {
-  parent: SidebarWorkspaceTree
-  renderRows: (sessions: SessionInfo[]) => React.ReactNode
-  onNewSession?: (path: null | string) => void
-  onReorderWorktree?: (parentId: string, ids: string[]) => void
-  dndSensors?: ReturnType<typeof useSensors>
-}
-
-function SortableSidebarWorkspaceParent(props: SortableWorkspaceParentProps) {
-  return <SidebarWorkspaceParent {...props} {...useSortableBindings(props.parent.id)} />
 }
 
 // Leading glyph shared by the overview row + scope banner.
@@ -2565,48 +2347,6 @@ function WorkspaceShowMoreButton({ count, label, onClick }: { count: number; lab
   )
 }
 
-// Reorder handle that lives in the header's leading-icon slot: the resting icon
-// fades out and a grabber fades in on hover/drag (same swap as the session row),
-// so the drag affordance never eats header width on the right.
-function WorkspaceReorderHandle({
-  dragHandleProps,
-  dragging,
-  icon,
-  label
-}: {
-  dragHandleProps?: React.HTMLAttributes<HTMLElement>
-  dragging: boolean
-  icon: React.ReactNode
-  label: string
-}) {
-  return (
-    <span
-      {...dragHandleProps}
-      aria-label={label}
-      className="group/handle relative -my-0.5 grid size-4 shrink-0 cursor-grab touch-none place-items-center self-stretch overflow-hidden active:cursor-grabbing"
-      data-reorder-handle
-      onClick={event => event.stopPropagation()}
-    >
-      <span
-        className={cn(
-          'grid place-items-center transition-opacity group-hover/handle:opacity-0 group-focus-within/handle:opacity-0',
-          dragging && 'opacity-0'
-        )}
-      >
-        {icon}
-      </span>
-      <Codicon
-        className={cn(
-          'absolute text-(--ui-text-quaternary) opacity-0 transition-opacity group-hover/handle:opacity-80 group-focus-within/handle:opacity-80 hover:text-(--ui-text-secondary)',
-          dragging && 'text-(--ui-text-secondary) opacity-100'
-        )}
-        name="grabber"
-        size="0.75rem"
-      />
-    </span>
-  )
-}
-
 // "+" affordance shared by repo and worktree headers — reveals on header hover.
 function WorkspaceAddButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
@@ -2703,33 +2443,24 @@ function StartWorkButton({ repoPath, onStarted }: { repoPath: string; onStarted:
 }
 
 // Collapsible header shared by the repo (emphasis) and worktree levels: a
-// toggle button whose leading glyph doubles as the reorder handle, plus an
-// optional trailing action (the +).
+// toggle button with a leading glyph, plus an optional trailing action (the +).
 function WorkspaceHeader({
   action,
   count,
-  dragHandleProps,
-  dragging = false,
   emphasis = false,
   icon,
   label,
   onToggle,
-  open,
-  reorderable = false
+  open
 }: {
   action?: React.ReactNode
   count: React.ReactNode
-  dragHandleProps?: React.HTMLAttributes<HTMLElement>
-  dragging?: boolean
   emphasis?: boolean
   icon: React.ReactNode
   label: string
   onToggle: () => void
   open: boolean
-  reorderable?: boolean
 }) {
-  const { t } = useI18n()
-
   return (
     <div
       className={cn(
@@ -2745,16 +2476,7 @@ function WorkspaceHeader({
         onClick={onToggle}
         type="button"
       >
-        {reorderable ? (
-          <WorkspaceReorderHandle
-            dragging={dragging}
-            dragHandleProps={dragHandleProps}
-            icon={icon}
-            label={t.sidebar.reorderWorkspace(label)}
-          />
-        ) : (
-          icon
-        )}
+        {icon}
         <span className="min-w-0 truncate">{label}</span>
         <span className="shrink-0">
           <SidebarCount>{count}</SidebarCount>

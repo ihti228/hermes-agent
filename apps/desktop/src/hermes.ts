@@ -65,7 +65,6 @@ export type {
   CronJobCreatePayload,
   CronJobSchedule,
   CronJobUpdates,
-  DiscoveredRepo,
   ElevenLabsVoice,
   ElevenLabsVoicesResponse,
   EnvVarInfo,
@@ -142,15 +141,12 @@ export async function listSessions(
   limit = 40,
   minMessages = 0,
   archived: 'exclude' | 'include' | 'only' = 'exclude',
-  order: 'created' | 'recent' = 'recent',
-  filter: { cwdPrefix?: string } = {}
+  order: 'created' | 'recent' = 'recent'
 ): Promise<PaginatedSessions> {
-  const cwdPrefixParam = filter.cwdPrefix ? `&cwd_prefix=${encodeURIComponent(filter.cwdPrefix)}` : ''
-
   const result = await window.hermesDesktop.api<PaginatedSessions>({
     path:
       `/api/sessions?limit=${limit}&offset=0&min_messages=${Math.max(0, minMessages)}` +
-      `&archived=${archived}&order=${order}${cwdPrefixParam}`,
+      `&archived=${archived}&order=${order}`,
     timeoutMs: SESSION_LIST_REQUEST_TIMEOUT_MS
   })
 
