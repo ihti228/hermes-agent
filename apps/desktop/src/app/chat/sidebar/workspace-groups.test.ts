@@ -531,7 +531,7 @@ describe('projectTreeFor', () => {
 
 describe('mergeRepoWorktreeGroups', () => {
   it('does not spawn a lane per discovered kanban task worktree', () => {
-    const merged = mergeRepoWorktreeGroups({ id: '/repo', groups: [] }, [
+    const merged = mergeRepoWorktreeGroups({ id: '/repo', path: '/repo', groups: [] }, [
       { branch: 'main', detached: false, isMain: true, locked: false, path: '/repo' },
       { branch: 'wt/t_aaaaaaaa', detached: false, isMain: false, locked: false, path: '/repo/.worktrees/t_aaaaaaaa' },
       { branch: 'wt/t_bbbbbbbb', detached: false, isMain: false, locked: false, path: '/repo/.worktrees/t_bbbbbbbb' }
@@ -543,10 +543,29 @@ describe('mergeRepoWorktreeGroups', () => {
   })
 
   it('still surfaces a real user worktree discovered by git', () => {
-    const merged = mergeRepoWorktreeGroups({ id: '/repo', groups: [] }, [
+    const merged = mergeRepoWorktreeGroups({ id: '/repo', path: '/repo', groups: [] }, [
       { branch: 'feature', detached: false, isMain: false, locked: false, path: '/repo-wt-feature' }
     ])
 
     expect(merged.map(g => g.label)).toEqual(['feature'])
+  })
+
+  it('hydrates main lanes from repo-root fetch and splits by recorded branch', () => {
+    const merged = mergeRepoWorktreeGroups(
+      { id: '/repo', path: '/repo', groups: [] },
+      [{ branch: 'main', detached: false, isMain: true, locked: false, path: '/repo' }],
+      {
+        '/repo': [
+          makeSession('/repo/src', { git_branch: 'main' }),
+          makeSession('/repo/docs', { git_branch: 'feature-x' }),
+          // Linked worktrees under `.worktrees/` stay out of main lanes.
+          makeSession('/repo/.worktrees/t_aaaaaaaa', { git_branch: 'wt/t_aaaaaaaa' })
+        ]
+      }
+    )
+
+    expect(merged.map(g => g.label)).toEqual(['main', 'feature-x'])
+    expect(merged.find(g => g.label === 'main')?.sessions).toHaveLength(1)
+    expect(merged.find(g => g.label === 'feature-x')?.sessions).toHaveLength(1)
   })
 })

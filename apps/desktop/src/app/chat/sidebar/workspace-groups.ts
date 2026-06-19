@@ -607,7 +607,7 @@ export function projectForSession(
 
 /** Merge session groups with live `git worktree list` lanes and per-path recents. */
 export function mergeRepoWorktreeGroups(
-  repo: Pick<SidebarWorkspaceTree, 'groups' | 'id'>,
+  repo: Pick<SidebarWorkspaceTree, 'groups' | 'id' | 'path'>,
   discoveredWorktrees?: HermesGitWorktree[],
   laneSessions?: Record<string, SessionInfo[]>
 ): SidebarSessionGroup[] {
@@ -615,6 +615,46 @@ export function mergeRepoWorktreeGroups(
   const seenIds = new Set(merged.map(group => group.id))
   const seenPaths = new Set(merged.map(group => group.path).filter((path): path is string => Boolean(path)))
   let hasMainGroup = merged.some(group => group.isMain)
+  const repoRoot = (repo.path || '').trim()
+
+  const isMainCheckoutSession = (session: SessionInfo, root: string): boolean => {
+    const cwd = (session.cwd || '').trim()
+    if (!cwd || !root) {
+      return false
+    }
+    if (cwd === root) {
+      return true
+    }
+    const posixPrefix = `${root}/`
+    const windowsPrefix = `${root}\\`
+    const inRoot = cwd.startsWith(posixPrefix) || cwd.startsWith(windowsPrefix)
+    if (!inRoot) {
+      return false
+    }
+    // Linked worktrees under `<repo>/.worktrees/*` belong to their own lanes.
+    return !cwd.startsWith(`${root}/.worktrees/`) && !cwd.startsWith(`${root}\\.worktrees\\`)
+  }
+
+  const branchLabelFor = (session: SessionInfo) => (session.git_branch || '').trim() || 'main'
+
+  // Seed main-checkout branch lanes from fetched repo-root sessions so repos
+  // discovered from history (with no loaded page rows) still render real lanes.
+  if (repoRoot) {
+    for (const session of laneSessions?.[repoRoot] ?? []) {
+      if (!isMainCheckoutSession(session, repoRoot)) {
+        continue
+      }
+      const branch = branchLabelFor(session)
+      const id = `${repo.id}::branch::${branch}`
+      if (seenIds.has(id)) {
+        continue
+      }
+      merged.push({ id, isMain: true, label: branch, path: repoRoot, sessions: [] })
+      seenIds.add(id)
+      seenPaths.add(repoRoot)
+      hasMainGroup = true
+    }
+  }
 
   for (const worktree of discoveredWorktrees ?? []) {
     const wtPath = worktree.path?.trim()
@@ -666,7 +706,7 @@ export function mergeRepoWorktreeGroups(
   }
 
   const hydrated = merged.map(group => {
-    if (group.isMain || !group.path) {
+    if (!group.path) {
       return group
     }
 
@@ -676,13 +716,21 @@ export function mergeRepoWorktreeGroups(
       return group
     }
 
+    const relevant = group.isMain
+      ? fetched.filter(session => isMainCheckoutSession(session, group.path!)).filter(session => branchLabelFor(session) === group.label)
+      : fetched
+
+    if (!relevant.length) {
+      return group
+    }
+
     if (!group.sessions.length) {
-      return { ...group, sessions: fetched }
+      return { ...group, sessions: relevant }
     }
 
     const byId = new Map(group.sessions.map(session => [session.id, session]))
 
-    for (const session of fetched) {
+    for (const session of relevant) {
       if (!byId.has(session.id)) {
         byId.set(session.id, session)
       }

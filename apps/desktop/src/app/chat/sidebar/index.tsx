@@ -273,13 +273,18 @@ const projectActivityTime = (project: SidebarProjectTree): number =>
 const latestProjectSessions = (project: SidebarProjectTree, limit: number): SessionInfo[] =>
   [...projectSessions(project)].sort((a, b) => sessionTime(b) - sessionTime(a)).slice(0, limit)
 
-function linkedWorktreePaths(
+function projectLanePaths(
   repos: SidebarWorkspaceTree[],
   repoWorktrees: Record<string, HermesGitWorktree[]>
 ): string[] {
   const paths = new Set<string>()
 
   for (const repo of repos) {
+    if (repo.path) {
+      // Fetch repo-root sessions too (main-checkout lanes hydrate from this).
+      paths.add(repo.path)
+    }
+
     for (const group of repo.groups) {
       if (!group.isMain && group.path) {
         paths.add(group.path)
@@ -942,13 +947,13 @@ export function ChatSidebar({
     Boolean(inProject && enteredProject && !showAllProfiles)
   )
 
-  const scopedLinkedLanePaths = useMemo(
-    () => (inProject && enteredProject ? linkedWorktreePaths(enteredProject.repos, scopedRepoWorktrees) : []),
+  const scopedLanePaths = useMemo(
+    () => (inProject && enteredProject ? projectLanePaths(enteredProject.repos, scopedRepoWorktrees) : []),
     [inProject, enteredProject, scopedRepoWorktrees]
   )
 
   const [scopedLaneSessions, scopedLaneSessionsLoading] = useWorktreeLaneSessions(
-    scopedLinkedLanePaths,
+    scopedLanePaths,
     Boolean(inProject && enteredProject && !showAllProfiles),
     profileScope
   )
