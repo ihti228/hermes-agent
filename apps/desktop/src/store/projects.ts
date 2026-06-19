@@ -267,14 +267,18 @@ export async function startWorkInRepo(
   return { branch: result.branch, path: result.path }
 }
 
-export async function removeWorktreePath(repoPath: string, worktreePath: string): Promise<void> {
+export async function removeWorktreePath(
+  repoPath: string,
+  worktreePath: string,
+  options?: { force?: boolean }
+): Promise<void> {
   const git = window.hermesDesktop?.git
 
   if (!git) {
     return
   }
 
-  await git.worktreeRemove(repoPath, worktreePath)
+  await git.worktreeRemove(repoPath, worktreePath, options)
   bumpWorktrees()
 }
 

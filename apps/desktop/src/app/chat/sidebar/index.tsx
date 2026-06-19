@@ -2161,19 +2161,27 @@ function RepoFlatSection({
   const repoCount = ordered.reduce((sum, group) => sum + group.sessions.length, 0)
 
   // Removal asks how: actually `git worktree remove` it, or just hide the lane
-  // and leave the worktree on disk.
+  // and leave the worktree on disk. A dirty worktree escalates to a force prompt
+  // instead of erroring (those changes are usually throwaway).
   const [removeTarget, setRemoveTarget] = useState<null | SidebarSessionGroup>(null)
+  const [forceTarget, setForceTarget] = useState<null | SidebarSessionGroup>(null)
 
-  const removeViaGit = async (group: SidebarSessionGroup) => {
+  const removeViaGit = async (group: SidebarSessionGroup, force = false) => {
     if (!repo.path || !group.path) {
       return
     }
 
     try {
-      await removeWorktreePath(repo.path, group.path)
+      await removeWorktreePath(repo.path, group.path, { force })
       dismissWorktree(group.id)
     } catch (err) {
-      notifyError(err, s.projects.removeWorktreeFailed)
+      // git refuses a non-force remove on a dirty/locked worktree — offer force
+      // rather than dead-ending on an error toast.
+      if (!force && /force|modified|untracked|dirty|locked|contains/i.test(String((err as Error)?.message ?? ''))) {
+        setForceTarget(group)
+      } else {
+        notifyError(err, s.projects.removeWorktreeFailed)
+      }
     }
   }
 
@@ -2193,27 +2201,32 @@ function RepoFlatSection({
     </>
   )
 
-  const removeDialog = (
-    <Dialog onOpenChange={isOpen => !isOpen && setRemoveTarget(null)} open={Boolean(removeTarget)}>
+  // Both removal prompts share the shape (hide-from-sidebar + cancel + a
+  // destructive action); only the copy and the destructive handler differ.
+  const worktreeDialog = (
+    target: null | SidebarSessionGroup,
+    setTarget: (next: null | SidebarSessionGroup) => void,
+    description: string,
+    destructiveLabel: string,
+    onDestructive: (group: SidebarSessionGroup) => void
+  ) => (
+    <Dialog onOpenChange={isOpen => !isOpen && setTarget(null)} open={Boolean(target)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{`${s.projects.removeWorktree} "${removeTarget?.label ?? ''}"?`}</DialogTitle>
-          <DialogDescription>
-            Remove it from git (deletes the worktree directory; the branch stays), or just hide the lane from the
-            sidebar and leave the worktree on disk.
-          </DialogDescription>
+          <DialogTitle>{`${s.projects.removeWorktree} "${target?.label ?? ''}"?`}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button onClick={() => setRemoveTarget(null)} variant="ghost">
+          <Button onClick={() => setTarget(null)} variant="ghost">
             Cancel
           </Button>
           <Button
             onClick={() => {
-              if (removeTarget) {
-                dismissWorktree(removeTarget.id)
+              if (target) {
+                dismissWorktree(target.id)
               }
 
-              setRemoveTarget(null)
+              setTarget(null)
             }}
             variant="secondary"
           >
@@ -2221,21 +2234,38 @@ function RepoFlatSection({
           </Button>
           <Button
             onClick={() => {
-              const target = removeTarget
-
-              setRemoveTarget(null)
+              setTarget(null)
 
               if (target) {
-                void removeViaGit(target)
+                onDestructive(target)
               }
             }}
             variant="destructive"
           >
-            {s.projects.removeWorktree}
+            {destructiveLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+
+  const removeDialog = (
+    <>
+      {worktreeDialog(
+        removeTarget,
+        setRemoveTarget,
+        'Remove it from git (deletes the worktree directory; the branch stays), or just hide the lane from the sidebar and leave the worktree on disk.',
+        s.projects.removeWorktree,
+        group => void removeViaGit(group)
+      )}
+      {worktreeDialog(
+        forceTarget,
+        setForceTarget,
+        'This worktree has uncommitted changes. Force-remove it (discards those changes), or just hide the lane and keep it on disk.',
+        'Force remove',
+        group => void removeViaGit(group, true)
+      )}
+    </>
   )
 
   if (!showHeader) {
