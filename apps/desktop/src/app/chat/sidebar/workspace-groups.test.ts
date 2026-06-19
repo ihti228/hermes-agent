@@ -74,15 +74,27 @@ describe('kanbanWorktreeDir', () => {
 })
 
 describe('sortWorktreeGroups', () => {
-  it('orders main branches first (trunk ahead of features), kanban last, then alpha', () => {
+  it('pins trunk to the top, sinks kanban to the bottom, and orders the rest by recency', () => {
+    const at = (t: number) => [makeSession('/x', { last_active: t })]
     const groups = [
-      lane({ id: 'k', label: 'kanban', isKanban: true }),
-      lane({ id: 'feat', label: 'feature', isMain: true }),
-      lane({ id: 'wt', label: 'a-worktree', isMain: false }),
-      lane({ id: 'main', label: 'main', isMain: true })
+      lane({ id: 'k', label: 'kanban', isKanban: true, sessions: at(999) }),
+      lane({ id: 'stale', label: 'stale-branch', isMain: true, sessions: at(10) }),
+      lane({ id: 'wt', label: 'busy-worktree', isMain: false, sessions: at(500) }),
+      lane({ id: 'main', label: 'main', isMain: true, sessions: at(1) })
     ]
 
-    expect(sortWorktreeGroups(groups).map(g => g.label)).toEqual(['main', 'feature', 'a-worktree', 'kanban'])
+    // main (trunk) first despite being least recent; kanban last despite being
+    // most recent; busy-worktree ahead of stale-branch by activity.
+    expect(sortWorktreeGroups(groups).map(g => g.label)).toEqual(['main', 'busy-worktree', 'stale-branch', 'kanban'])
+  })
+
+  it('falls back to label order for equally-idle lanes', () => {
+    const groups = [
+      lane({ id: 'b', label: 'beta', isMain: false }),
+      lane({ id: 'a', label: 'alpha', isMain: false })
+    ]
+
+    expect(sortWorktreeGroups(groups).map(g => g.label)).toEqual(['alpha', 'beta'])
   })
 })
 

@@ -80,29 +80,33 @@ export const DEFAULT_BRANCH_LABEL = 'main'
 /** The one definition of a main-checkout lane id (must match the backend tree). */
 export const branchLaneId = (repoRoot: string, branch?: string): string => `${repoRoot}::branch::${(branch ?? '').trim()}`
 
-/** Default-branch names that sort first and read as the repo's trunk. */
+/** Default-branch names that pin to the top and read as the repo's trunk. */
 const TRUNK_BRANCHES = new Set(['main', 'master', 'trunk', 'develop'])
 
+const isTrunkLane = (group: SidebarSessionGroup): boolean =>
+  Boolean(group.isMain) && TRUNK_BRANCHES.has(group.label.toLowerCase())
+
+/** A lane's recency = its most-recently-active session (empty lanes sink). */
+const laneActivity = (group: SidebarSessionGroup): number =>
+  group.sessions.reduce((max, session) => Math.max(max, session.last_active || session.started_at || 0), 0)
+
+/**
+ * Trunk (main/master/...) sticks to the top; the kanban aggregate sinks to the
+ * bottom; everything between — branches and linked worktrees alike — sorts by
+ * most-recent activity (empty lanes fall last), label as the tiebreak.
+ */
 function compareWorktreeGroups(a: SidebarSessionGroup, b: SidebarSessionGroup): number {
-  if (Boolean(a.isMain) !== Boolean(b.isMain)) {
-    return a.isMain ? -1 : 1
+  if (isTrunkLane(a) !== isTrunkLane(b)) {
+    return isTrunkLane(a) ? -1 : 1
   }
 
-  if (a.isMain && b.isMain) {
-    const aTrunk = TRUNK_BRANCHES.has(a.label.toLowerCase())
-    const bTrunk = TRUNK_BRANCHES.has(b.label.toLowerCase())
-
-    if (aTrunk !== bTrunk) {
-      return aTrunk ? -1 : 1
-    }
-  }
-
-  // The collapsed kanban bucket sinks below real branches.
   if (Boolean(a.isKanban) !== Boolean(b.isKanban)) {
     return a.isKanban ? 1 : -1
   }
 
-  return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+  const byActivity = laneActivity(b) - laneActivity(a)
+
+  return byActivity || a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
 }
 
 export function sortWorktreeGroups(groups: SidebarSessionGroup[]): SidebarSessionGroup[] {
@@ -295,6 +299,7 @@ export function overlayLiveLanes(project: SidebarProjectTree, live: SessionInfo[
     }
 
     const lanes = lanesByRepo.get(repo.id)!
+
     const lane =
       lanes.find(g => g.id === placed.id) ??
       (placed.isMain ? lanes.find(g => g.isMain && g.label.toLowerCase() === placed.label.toLowerCase()) : undefined)

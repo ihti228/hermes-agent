@@ -178,13 +178,15 @@ def _session_repo_root(session: dict, resolve: Optional[Resolve]) -> str:
 
 
 def _lane_sort_key(group: dict) -> tuple:
-    is_main = bool(group.get("isMain"))
-    is_trunk = is_main and group["label"].lower() in _TRUNK_BRANCHES
+    # Trunk pins to the top; the kanban aggregate sinks to the bottom; the rest
+    # (branches + linked worktrees) sort by most-recent activity, then label.
+    is_trunk = bool(group.get("isMain")) and group["label"].lower() in _TRUNK_BRANCHES
     is_kanban = bool(group.get("isKanban"))
+    activity = max((_session_time(s) for s in group.get("sessions") or []), default=0.0)
     return (
-        0 if is_main else 1,
         0 if is_trunk else 1,
         1 if is_kanban else 0,
+        -activity,
         group["label"].lower(),
     )
 
