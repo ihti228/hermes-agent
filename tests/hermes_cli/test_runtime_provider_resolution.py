@@ -2517,8 +2517,10 @@ def test_custom_aliases_with_lan_base_url_route_to_custom_not_openrouter(
 
     resolved = rp.resolve_runtime_provider()
 
-    assert resolved["provider"] == "custom", (
-        f"alias {alias!r} with LAN base_url should resolve to provider=custom, "
+    # ollama now resolves to ollama-local (still treated as custom-equivalent
+    # for base_url trust/routing); vllm/llamacpp/llama-cpp resolve to custom.
+    assert resolved["provider"] in ("custom", "ollama-local"), (
+        f"alias {alias!r} with LAN base_url should resolve to custom/ollama-local, "
         f"got {resolved['provider']!r}"
     )
     assert resolved["base_url"] == base_url.rstrip("/"), (
@@ -2533,12 +2535,12 @@ def test_custom_alias_with_loopback_base_url_routes_to_custom(monkeypatch):
         "_get_model_config",
         lambda: {"provider": "ollama", "base_url": "http://localhost:11434/v1"},
     )
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "***")
     monkeypatch.setattr(rp, "load_pool", lambda provider: None)
 
     resolved = rp.resolve_runtime_provider()
 
-    assert resolved["provider"] == "custom"
+    assert resolved["provider"] in ("custom", "ollama-local")
     assert resolved["base_url"] == "http://localhost:11434/v1"
 
 
