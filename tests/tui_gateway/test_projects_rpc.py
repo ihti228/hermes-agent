@@ -86,6 +86,20 @@ def test_delete_removes_project(tmp_path):
 def test_discover_repos_is_registered_long_handler():
     assert "projects.discover_repos" in server._methods
     assert "projects.discover_repos" in server._LONG_HANDLERS
+    assert "projects.record_repos" in server._methods
+    assert "projects.record_repos" in server._LONG_HANDLERS
+
+
+def test_record_repos_persists_and_shows_zero_session_repo(tmp_path):
+    repo = tmp_path / "fresh-repo"
+    repo.mkdir()
+
+    # Repo-first: a scanned repo with no hermes sessions still surfaces.
+    _call("projects.record_repos", {"repos": [{"root": str(repo), "label": "fresh-repo"}]})
+
+    by_label = {r["label"]: r for r in _call("projects.discover_repos")["repos"]}
+    assert "fresh-repo" in by_label
+    assert by_label["fresh-repo"]["sessions"] == 0
 
 
 def test_discover_repos_from_full_history(tmp_path):

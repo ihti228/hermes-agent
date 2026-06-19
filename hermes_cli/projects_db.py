@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS project_meta (
     key    TEXT PRIMARY KEY,
     value  TEXT
 );
+
+-- Git repos found by scanning the filesystem (desktop "repo-first" discovery).
+-- Cached here so the overview is instant after the first scan instead of
+-- re-walking the disk every time the Projects view opens.
+CREATE TABLE IF NOT EXISTS discovered_repos (
+    root          TEXT PRIMARY KEY,
+    label         TEXT,
+    last_seen     INTEGER NOT NULL
+);
 """
 
 
@@ -641,6 +650,66 @@ def get_active(conn: sqlite3.Connection) -> Optional[Project]:
     if not pid:
         return None
     return get_project(conn, pid)
+
+
+# ---------------------------------------------------------------------------
+# Discovered repos (filesystem scan cache)
+# ---------------------------------------------------------------------------
+
+
+def record_discovered_repos(
+    conn: sqlite3.Connection,
+    repos: Iterable[tuple[str, Optional[str]]],
+    *,
+    replace: bool = False,
+) -> int:
+    """Persist scanned git repo roots into the cache.
+
+    ``repos`` is an iterable of ``(root, label)``. Roots are normalized; the
+    label falls back to the basename. Returns the number of rows written.
+
+    When ``replace`` is true, this is the authoritative result of a fresh disk
+    scan: delete stale rows first so old eval/worktree noise disappears instead
+    of living forever in the cache.
+    """
+    now = _now()
+    rows = []
+    for root, label in repos:
+        norm = _normalize_path(root)
+        if not norm:
+            continue
+        rows.append((norm, (label or os.path.basename(norm) or norm), now))
+
+    with write_txn(conn):
+        if replace:
+            conn.execute("DELETE FROM discovered_repos")
+        if rows:
+            conn.executemany(
+                "INSERT INTO discovered_repos (root, label, last_seen) VALUES (?, ?, ?) "
+                "ON CONFLICT(root) DO UPDATE SET label = excluded.label, "
+                "last_seen = excluded.last_seen",
+                rows,
+            )
+    return len(rows)
+
+
+def list_discovered_repos(conn: sqlite3.Connection) -> List[dict]:
+    """All cached discovered repo roots, most-recently-seen first."""
+    rows = conn.execute(
+        "SELECT root, label, last_seen FROM discovered_repos ORDER BY last_seen DESC"
+    ).fetchall()
+    return [
+        {"root": r["root"], "label": r["label"], "last_seen": r["last_seen"]}
+        for r in rows
+    ]
+
+
+def forget_discovered_repo(conn: sqlite3.Connection, root: str) -> bool:
+    """Drop a single cached repo (e.g. user dismissed it)."""
+    norm = _normalize_path(root)
+    with write_txn(conn):
+        cur = conn.execute("DELETE FROM discovered_repos WHERE root = ?", (norm,))
+    return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------------------

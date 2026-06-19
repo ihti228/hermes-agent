@@ -18,6 +18,39 @@ def conn(tmp_path):
         c.close()
 
 
+def test_record_and_list_discovered_repos(conn):
+    n = pdb.record_discovered_repos(conn, [("/www/alpha", "alpha"), ("/www/beta", None)])
+    assert n == 2
+
+    rows = {r["root"]: r["label"] for r in pdb.list_discovered_repos(conn)}
+    assert rows["/www/alpha"] == "alpha"
+    # Label defaults to the basename when not given.
+    assert rows["/www/beta"] == "beta"
+
+
+def test_record_discovered_repos_upserts(conn):
+    pdb.record_discovered_repos(conn, [("/www/alpha", "old")])
+    pdb.record_discovered_repos(conn, [("/www/alpha", "new")])
+
+    rows = pdb.list_discovered_repos(conn)
+    assert len(rows) == 1
+    assert rows[0]["label"] == "new"
+
+
+def test_record_discovered_repos_replace_drops_stale_rows(conn):
+    pdb.record_discovered_repos(conn, [("/www/alpha", "alpha"), ("/www/beta", "beta")])
+    pdb.record_discovered_repos(conn, [("/www/alpha", "fresh")], replace=True)
+
+    rows = {r["root"]: r["label"] for r in pdb.list_discovered_repos(conn)}
+    assert rows == {"/www/alpha": "fresh"}
+
+
+def test_forget_discovered_repo(conn):
+    pdb.record_discovered_repos(conn, [("/www/alpha", "alpha")])
+    assert pdb.forget_discovered_repo(conn, "/www/alpha") is True
+    assert pdb.list_discovered_repos(conn) == []
+
+
 def test_create_get_list(conn):
     pid = pdb.create_project(conn, name="Hermes Agent", folders=["/tmp/hermes"])
     proj = pdb.get_project(conn, pid)

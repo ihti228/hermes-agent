@@ -179,7 +179,10 @@ _LONG_HANDLERS = frozenset(
         "cli.exec",
         "plugins.manage",
         "projects.discover_repos",
+        "projects.record_repos",
         "projects.for_cwd",
+        "projects.tree",
+        "projects.project_sessions",
         "session.branch",
         "session.compress",
         "session.resume",
@@ -1173,6 +1176,65 @@ def _git_repo_root_for_cwd(cwd: str) -> str:
         root = ""
     _repo_root_cache[cwd] = root
     return root
+
+
+_common_root_cache: dict[str, str] = {}
+
+
+def _git_common_repo_root_for_cwd(cwd: str) -> str:
+    """The MAIN (common) repo root for ``cwd``, folding linked worktrees.
+
+    ``git rev-parse --show-toplevel`` returns a linked worktree's OWN root, so
+    grouping by it splits every worktree into a separate "repo". The common
+    ``.git`` directory (``--git-common-dir``) is shared by a repo and all its
+    worktrees, so its parent is the one true repo root. Cached. Falls back to
+    the show-toplevel root when the common-dir probe is unavailable.
+    """
+    if not cwd:
+        return ""
+    if cwd in _common_root_cache:
+        return _common_root_cache[cwd]
+
+    root = ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            gitdir = result.stdout.strip()
+            if gitdir:
+                gitdir = os.path.realpath(gitdir)
+                if os.path.basename(gitdir) == ".git":
+                    root = os.path.dirname(gitdir)
+    except Exception:
+        root = ""
+
+    if not root:
+        root = _git_repo_root_for_cwd(cwd)
+
+    _common_root_cache[cwd] = root
+    return root
+
+
+def _resolve_cwd_git(cwd: str) -> dict | None:
+    """Inject-able resolver for ``project_tree.build_tree``.
+
+    Returns ``{"repo_root": <common root>, "worktree_root": <this checkout>}``
+    or ``None`` when ``cwd`` is not in a git repo. ``build_tree`` treats
+    ``worktree_root == repo_root`` as the main checkout.
+    """
+    worktree_root = _git_repo_root_for_cwd(cwd)
+    if not worktree_root:
+        return None
+    return {
+        "repo_root": _git_common_repo_root_for_cwd(cwd) or worktree_root,
+        "worktree_root": worktree_root,
+    }
 
 
 def _session_cwd(session: dict | None) -> str:
@@ -8311,54 +8373,227 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5061, str(e))
 
 
+def _discover_repos_payload(db) -> list[dict]:
+    """Merge filesystem-scanned repos (cached) with session-derived repo roots.
+
+    Repo-first: the disk scan (persisted by `projects.record_repos`) surfaces
+    repos even with zero hermes sessions. Session-derived roots cover repos
+    outside the scan roots. Both are junk-filtered (hermes home subtree + bare
+    home) and carry their session totals for the overview.
+    """
+    from hermes_constants import get_hermes_home
+
+    home = os.path.realpath(os.path.expanduser("~"))
+    hermes_home = os.path.realpath(str(get_hermes_home()))
+
+    def _is_junk(root: str) -> bool:
+        real = os.path.realpath(root)
+        return real == home or real == hermes_home or real.startswith(hermes_home + os.sep)
+
+    repos: dict[str, dict] = {}
+
+    # Session-derived roots (probe each distinct cwd, cached) + backfill the column.
+    cwd_to_root: dict[str, str] = {}
+    for row in db.distinct_session_cwds():
+        cwd = str(row.get("cwd") or "")
+        root = _git_repo_root_for_cwd(cwd)
+        if not root:
+            continue
+        cwd_to_root[cwd] = root
+        if _is_junk(root):
+            continue
+        agg = repos.setdefault(root, {"root": root, "label": "", "sessions": 0, "last_active": 0.0})
+        agg["sessions"] += int(row.get("sessions") or 0)
+        agg["last_active"] = max(agg["last_active"], float(row.get("last_active") or 0))
+
+    try:
+        db.backfill_repo_roots(cwd_to_root)
+    except Exception:
+        logger.debug("failed to backfill repo roots", exc_info=True)
+
+    # Filesystem-scanned roots from the cache (may have zero sessions).
+    try:
+        from hermes_cli import projects_db as pdb
+
+        with pdb.connect_closing() as conn:
+            for entry in pdb.list_discovered_repos(conn):
+                root = str(entry.get("root") or "")
+                if not root or _is_junk(root):
+                    continue
+                agg = repos.setdefault(root, {"root": root, "label": "", "sessions": 0, "last_active": 0.0})
+                if entry.get("label"):
+                    agg["label"] = entry["label"]
+                agg["last_active"] = max(agg["last_active"], float(entry.get("last_seen") or 0))
+    except Exception:
+        logger.debug("failed to read discovered repo cache", exc_info=True)
+
+    out = sorted(repos.values(), key=lambda r: r["last_active"], reverse=True)
+    for r in out:
+        r["label"] = r["label"] or os.path.basename(r["root"].rstrip("/\\")) or r["root"]
+    return out
+
+
 @method("projects.discover_repos")
 def _(rid, params: dict) -> dict:
-    """Git repos inferred from the FULL session history.
-
-    Groups every distinct session cwd by its git repo root (probed server-side),
-    so the desktop can auto-surface the repos a user has actually worked in —
-    not just the ones in the loaded recents page. The hermes home subtree and the
-    bare home directory are excluded so `.hermes` / launch-dir noise never reads
-    as a project.
-    """
+    """Repos for the desktop overview: scanned-from-disk (cached) ∪ session-derived."""
     try:
-        from hermes_constants import get_hermes_home
-
         db = _get_db()
         if db is None:
             return _ok(rid, {"repos": []})
+        return _ok(rid, {"repos": _discover_repos_payload(db)})
+    except Exception as e:
+        return _err(rid, 5061, str(e))
 
-        home = os.path.realpath(os.path.expanduser("~"))
-        hermes_home = os.path.realpath(str(get_hermes_home()))
 
-        repos: dict[str, dict] = {}
-        cwd_to_root: dict[str, str] = {}
-        for row in db.distinct_session_cwds():
-            cwd = str(row.get("cwd") or "")
-            root = _git_repo_root_for_cwd(cwd)
-            if root:
-                cwd_to_root[cwd] = root
-            if not root:
-                continue
-            real = os.path.realpath(root)
-            if real == home or real == hermes_home or real.startswith(hermes_home + os.sep):
-                continue
-            agg = repos.setdefault(root, {"root": root, "sessions": 0, "last_active": 0.0})
-            agg["sessions"] += int(row.get("sessions") or 0)
-            agg["last_active"] = max(agg["last_active"], float(row.get("last_active") or 0))
+@method("projects.record_repos")
+def _(rid, params: dict) -> dict:
+    """Persist git repo roots found by the client's filesystem scan, then return
+    the merged repo list. The native crawl runs on the desktop (local fs); this
+    caches the result so later reads are instant instead of re-walking disk."""
+    try:
+        from hermes_cli import projects_db as pdb
 
-        # Persist the resolved roots so session rows self-describe their project
-        # (grouping reads the column; future calls skip the probe).
-        try:
-            db.backfill_repo_roots(cwd_to_root)
-        except Exception:
-            logger.debug("failed to backfill repo roots", exc_info=True)
+        pairs: list[tuple[str, str | None]] = []
+        for item in params.get("repos") or []:
+            if isinstance(item, str):
+                pairs.append((item, None))
+            elif isinstance(item, dict) and item.get("root"):
+                pairs.append((str(item["root"]), item.get("label")))
 
-        out = sorted(repos.values(), key=lambda r: r["last_active"], reverse=True)
-        for r in out:
-            r["label"] = os.path.basename(r["root"].rstrip("/\\")) or r["root"]
-            r["branch"] = _git_branch_for_cwd(r["root"])
-        return _ok(rid, {"repos": out})
+        with pdb.connect_closing() as conn:
+            pdb.record_discovered_repos(conn, pairs, replace=True)
+
+        db = _get_db()
+        return _ok(rid, {"repos": _discover_repos_payload(db) if db is not None else []})
+    except Exception as e:
+        return _err(rid, 5061, str(e))
+
+
+# Sources excluded from the project tree: cron runs and tool/subagent children
+# are not user conversations. Subagent/compression children are already dropped
+# by list_sessions_rich(include_children=False); cron has its own section.
+_PROJECT_TREE_EXCLUDED_SOURCES = ["cron"]
+
+
+def _project_tree_row(r: dict) -> dict:
+    """Project a SessionDB row to the minimal shape the sidebar renders.
+
+    Keeps the fields the grouping needs (cwd / git_branch / git_repo_root) plus
+    everything ``SidebarSessionRow`` reads, and drops the heavy columns
+    (system_prompt, model_config, ...) so the tree payload stays lean.
+    """
+    return {
+        "id": r.get("id"),
+        "_lineage_root_id": r.get("_lineage_root_id"),
+        "title": r.get("title"),
+        "preview": r.get("preview"),
+        "started_at": r.get("started_at") or 0,
+        "ended_at": r.get("ended_at"),
+        "last_active": r.get("last_active") or r.get("started_at") or 0,
+        "source": r.get("source"),
+        "archived": bool(r.get("archived")),
+        "message_count": r.get("message_count") or 0,
+        "tool_call_count": r.get("tool_call_count") or 0,
+        "input_tokens": r.get("input_tokens") or 0,
+        "output_tokens": r.get("output_tokens") or 0,
+        "model": r.get("model"),
+        "is_active": False,
+        "cwd": r.get("cwd"),
+        "git_branch": r.get("git_branch"),
+        "git_repo_root": r.get("git_repo_root"),
+    }
+
+
+def _project_tree_inputs(db, session_limit: int) -> tuple[list[dict], list[dict], list[dict], str | None]:
+    """Gather (sessions, projects, discovered_repos, active_id) for build_tree."""
+    rows = db.list_sessions_rich(
+        limit=session_limit,
+        offset=0,
+        order_by_last_active=True,
+        min_message_count=1,
+        include_children=False,
+        exclude_sources=_PROJECT_TREE_EXCLUDED_SOURCES,
+        include_archived=False,
+    )
+    sessions = [_project_tree_row(r) for r in rows]
+
+    from hermes_cli import projects_db as pdb
+
+    with pdb.connect_closing() as conn:
+        projects = [p.to_dict() for p in pdb.list_projects(conn)]
+        active_id = pdb.get_active_id(conn)
+
+    discovered = _discover_repos_payload(db)
+    return sessions, projects, discovered, active_id
+
+
+@method("projects.tree")
+def _(rid, params: dict) -> dict:
+    """Authoritative project overview: project -> repo -> lane structure with
+    counts + a few preview sessions per project, plus the flat set of session
+    ids claimed by any project (so the desktop excludes them from flat Recents).
+    Lanes carry no session rows here; drill-in uses ``projects.project_sessions``.
+    """
+    try:
+        from tui_gateway import project_tree
+
+        db = _get_db()
+        if db is None:
+            return _ok(rid, {"projects": [], "active_id": None, "scoped_session_ids": []})
+
+        preview_limit = int(params.get("preview_limit") or 3)
+        session_limit = int(params.get("session_limit") or 2000)
+        sessions, projects, discovered, active_id = _project_tree_inputs(db, session_limit)
+
+        tree = project_tree.build_tree(
+            projects,
+            sessions,
+            discovered,
+            _resolve_cwd_git,
+            preview_limit=preview_limit,
+            hydrate=False,
+        )
+        return _ok(
+            rid,
+            {
+                "projects": tree["projects"],
+                "active_id": active_id,
+                "scoped_session_ids": tree["scoped_session_ids"],
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5061, str(e))
+
+
+@method("projects.project_sessions")
+def _(rid, params: dict) -> dict:
+    """Fully hydrated lanes (repo -> lane -> session rows) for one project,
+    built from the same authoritative grouping as ``projects.tree`` so ids and
+    membership match exactly. Used when the user enters a project."""
+    try:
+        from tui_gateway import project_tree
+
+        project_id = str(params.get("project_id") or "")
+        if not project_id:
+            return _err(rid, 5063, "project_id required")
+
+        db = _get_db()
+        if db is None:
+            return _ok(rid, {"project": None})
+
+        session_limit = int(params.get("session_limit") or 5000)
+        sessions, projects, discovered, _active = _project_tree_inputs(db, session_limit)
+
+        tree = project_tree.build_tree(
+            projects,
+            sessions,
+            discovered,
+            _resolve_cwd_git,
+            preview_limit=0,
+            hydrate=True,
+        )
+        proj = next((p for p in tree["projects"] if p["id"] == project_id), None)
+        return _ok(rid, {"project": proj})
     except Exception as e:
         return _err(rid, 5061, str(e))
 
