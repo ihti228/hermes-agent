@@ -924,6 +924,97 @@ def _model_flow_custom(config):
         api_mode=api_mode,
     )
 
+def _model_flow_ollama_local(config, current_model=""):
+    """Ollama local provider: prompt for URL, fetch models, save config.
+
+    Simplified flow for local Ollama instances — no API key needed,
+    just the base URL (default http://localhost:11434/v1).
+    """
+    from hermes_cli.config import load_config, save_config
+
+    default_url = "http://localhost:11434/v1"
+
+    # Read current base_url from config if already set
+    try:
+        _m = load_config().get("model") or {}
+        if str(_m.get("provider") or "").strip().lower() == "ollama-local":
+            default_url = str(_m.get("base_url") or default_url).strip() or default_url
+    except Exception:
+        pass
+
+    print()
+    print("  ┌─ Ollama (Local) ─────────────────────────────────┐")
+    print("  │ No API key required — just the base URL.         │")
+    print("  └──────────────────────────────────────────────────┘")
+    print()
+
+    url = input(f"  Ollama base URL [{default_url}]: ").strip()
+    if not url:
+        url = default_url
+
+    # Ensure /v1 suffix
+    if not url.endswith("/v1"):
+        if url.endswith("/"):
+            url = url + "v1"
+        else:
+            url = url + "/v1"
+
+    # Fetch available models
+    print(f"\n  Fetching models from {url}...")
+    from providers import get_provider_profile
+
+    profile = get_provider_profile("ollama-local")
+    models = None
+    if profile:
+        models = profile.fetch_models(base_url=url, timeout=10)
+
+    if not models:
+        print("  ⚠ Could not fetch model list (is Ollama running?)")
+        print("  You can enter the model name manually.")
+        models = []
+
+    model_name = ""
+    if models:
+        print()
+        for i, m in enumerate(models, 1):
+            marker = " ←" if m == current_model else ""
+            print(f"  {i}. {m}{marker}")
+        print(f"  {len(models)+1}. Enter custom model name")
+        print()
+        choice = input(f"  Select model [1-{len(models)+1}]: ").strip()
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(models):
+                model_name = models[idx]
+        except (ValueError, IndexError):
+            pass
+
+        if not model_name and choice == str(len(models) + 1):
+            model_name = input("  Model name: ").strip()
+
+    if not model_name:
+        model_name = input("  Model name (e.g. gemma4:26b): ").strip()
+
+    if not model_name:
+        print("  No model selected. Aborting.")
+        return
+
+    # Save to config
+    cfg = load_config()
+    model_cfg = cfg.get("model") or {}
+    model_cfg["default"] = model_name
+    model_cfg["provider"] = "ollama-local"
+    model_cfg["base_url"] = url
+    model_cfg["api_key"] = ""  # local Ollama needs no key
+    cfg["model"] = model_cfg
+    save_config(cfg)
+
+    print()
+    print(f"  ✅ Model set to {model_name}")
+    print(f"  ✅ Provider: ollama-local ({url})")
+    print()
+    print("  Restart Hermes for changes to take effect.")
+
 def _model_flow_azure_foundry(config, current_model=""):
     """Azure Foundry provider: configure endpoint, auth mode, API mode, and model.
 

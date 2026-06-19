@@ -604,6 +604,7 @@ from hermes_cli.model_setup_flows import (
     _model_flow_minimax_oauth,
     _model_flow_google_gemini_cli,
     _model_flow_custom,
+    _model_flow_ollama_local,
     _model_flow_azure_foundry,
     _model_flow_named_custom,
     _model_flow_copilot,
@@ -3017,6 +3018,8 @@ def select_provider_and_model(args=None):
         _model_flow_copilot_acp(config, current_model)
     elif selected_provider == "copilot":
         _model_flow_copilot(config, current_model)
+    elif selected_provider == "ollama-local":
+        _model_flow_ollama_local(config, current_model)
     elif selected_provider == "custom":
         _model_flow_custom(config)
     elif (
